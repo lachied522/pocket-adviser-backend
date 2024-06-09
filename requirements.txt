@@ -1,0 +1,7 @@
+pydantic
+sqlalchemy
+psycopg2
+python-dotenv
+pandas
+numpy
+scipy
