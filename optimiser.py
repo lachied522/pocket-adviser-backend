@@ -10,8 +10,9 @@ class Optimser:
     wp: pd.DataFrame # combined universe and portfolio were units is zero for stocks not held
     target: float # target portfolio value
     delta_value: float # target change in portfolio value
+    error: float # margin for error when using target weights or amounts
     threshold: float # minimum weight for stock to be included in optimal portfolio
-    error: float
+    formula: str = 'treynor' # formula used for utility function
     
     def __init__(
         self,
@@ -35,15 +36,36 @@ class Optimser:
         self.threshold = threshold
         self.error = error
     
-    def inv_utility_function(self, a, exp_returns, betas, r, a0, additional_factors: List[np.array] = []):
+    def inv_utility_function(
+            self,
+            a: np.ndarray | pd.Series,
+            exp_returns: np.ndarray | pd.Series,
+            betas: np.ndarray | pd.Series,
+            r_f: float,
+            a0: np.ndarray | pd.Series,
+            additional_factors: List[np.ndarray] = []
+        ):
         """
-        Inverse utility function for optimisation. Utility is modified Treynor Ratio with penalties.
+        Inverse utility function for optimisation.
         """
-        U = (np.dot(a, exp_returns + np.array(additional_factors).sum(axis=0)) - r) / np.dot(a, betas)
+        match self.formula:
+            case 'treynor':
+                # Treynor ratio = (r_p - r_f) / Beta_p
+                # see https://www.investopedia.com/terms/t/treynorratio.asp
+                r_p = np.dot(a, exp_returns + np.array(additional_factors).sum(axis=0))
+                Beta_p = np.dot(a, betas)
+                U = (r_p - r_f) / Beta_p
+
+            case 'sharpe':
+                # Sharpe ratio = (r_p - r_f) / Sigma_p, see https://www.investopedia.com/terms/t/treynorratio.asp
+                # requires stock volatilities
+                raise NotImplementedError()
+
         # penalty is applied to discourage weights between 0 and 5% of the portfolio and deviations from current values
         # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
         # this doesn't appear to work very well as weights close 0 and 5% are generated frequently
         # and deviations from current values are common
+
         penalty = 2 * (np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int)) + np.dot(a, a - a0 != 0)) / self.target
         return -(U-penalty)
     
@@ -79,76 +101,27 @@ class Optimser:
         # set keep_feasible True to ensure iterations remain within bounds
         bnds = Bounds(lb, ub, keep_feasible=True)
 
-        # first guess is equal weight
-        equal_weight = self.target * np.ones(len(op)) / len(op)
-
         # utility function arguments
         a0 = op['units'] * op['previousClose']
         betas = op['beta']
         exp_returns = op.apply(lambda x: x['priceTarget'] / x['previousClose'] - 1, axis=1)
 
+        # get initial 'adjusted' utility
+        self.initial_adj_utility = self.inv_utility_function(a0, exp_returns, betas, r, a0, additional_factors)
+
+        # first guess for minimiser is equal weight
+        equal_weight = self.target * np.ones(len(op)) / len(op)
+
         # SLSQP appears to perform the best
         a = minimize(self.inv_utility_function, equal_weight, args=(exp_returns, betas, r, a0, additional_factors),
                     method='SLSQP', bounds=bnds, constraints=cons,
                     options={'maxiter': 100}).x
+        
+        # get final 'adjusted' utility
+        self.final_adj_utility = self.inv_utility_function(a, exp_returns, betas, r, a0, additional_factors)
 
         # update units column of optimal portfolio and return
         op['units'] = np.round(a / op['previousClose'])
         # drop zero unit rows and return
         self.optimal_portfolio = op.drop(op[op['units'] < 1].index)
         return self.optimal_portfolio
-
-    def get_transactions(
-        self,
-        n: int = -1 # maximum number of transactions to return
-    ):
-        """
-        Return difference between current portfolio and optimal portfolio as recommended transactions.
-        """
-        if not hasattr(self, "optimal_portfolio"):
-            self.get_optimal_portfolio()
-
-        df = pd.merge(
-            self.portfolio[["symbol", "units"]],
-            self.optimal_portfolio[["symbol", "units", "name", "previousClose"]],
-            how="outer",
-            on="symbol",
-            suffixes=("_current", "_optimal")
-        ).fillna(0)
-
-        # remove any inf values
-        df.replace([np.inf, -np.inf], 0, inplace=True)
-
-        # calculate units column
-        df["units"] = df['units_optimal'] - df['units_current']
-
-        # drop any rows where units is zero
-        df = df.drop(df[df['units']==0].index)
-
-        # sort by absolute difference
-        df = df.sort_values('units', key=np.abs, ascending=False)
-
-        # loop through transactions until either target is met or n > N
-        value = 0
-        transactions = pd.DataFrame(columns=df.columns.to_list()) # create new DF
-        for index, row in df.iterrows():
-            if abs(value) > abs(self.target) or (n > 0 and len(transactions) >= n):
-                break
-
-            if np.sign(row['units']) == np.sign(self.delta_value):
-                # if sign of transaction matches target, add to recommended transactions
-                v = row['units'] * row['previousClose']
-                # check if transaction will reach target
-                if abs(value + v) <= abs(self.target):
-                    transactions.loc[index,:] = row
-                    value += v
-
-                else:
-                    # add partial transaction
-                    partial_row = row.copy()
-                    # round units up / down to nearest integer
-                    partial_row['units'] = np.copysign(np.ceil((np.abs(self.target - value)) / row['previousClose']), v)
-                    transactions.loc[index,:] = partial_row
-                    break
-
-        return transactions

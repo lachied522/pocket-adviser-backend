@@ -2,7 +2,6 @@ import pandas as pd
 
 from crud import get_stocks
 
-
 def get_universe(as_dataframe: bool = True):
     data = get_stocks()
     
