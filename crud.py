@@ -1,29 +1,17 @@
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
+from database import SessionManager
 import models
 
-def get_all_stocks(db: Session = SessionLocal()):
+def get_all_stocks(manager: SessionManager = SessionManager()):
     # fetch all stock records
-    data = db.query(models.Stock).all()
-    # close db before returning
-    db.close()
-
-    return data
+    return manager.session.query(models.Stock).all()
      
-def get_stock_by_symbol(symbol: str, db: Session = SessionLocal()):
+def get_stock_by_symbol(symbol: str, manager: SessionManager = SessionManager()):
     # fetch stock where symbol matches param
-    data = db.query(models.Stock).filter(models.Stock.symbol == symbol.lower()).first()
-    # close db before returning
-    db.close()
-    
-    return data
+    return manager.session.query(models.Stock).filter(models.Stock.symbol == symbol.lower()).first()
 
-def get_holdings(db: Session = SessionLocal()):
+def get_holdings(manager: SessionManager = SessionManager()):
     # fetch all holding records
-    data = db.query(models.Holding).all()
-    # close db before returning
-    db.close()
-    
-    return data
+    return manager.session.query(models.Holding).all()

@@ -26,3 +26,10 @@ class Holding(BaseModel):
 
 class PopulatedHolding(Stock, Holding):
     pass
+
+class GetAdviceByStockRequest(BaseModel):
+    symbol: str
+    amount: float
+
+class GetRecommendationsRequest(BaseModel):
+    delta_value: float

@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
-from helpers import merge_portfolio_with_universe
+from helpers import get_universe, merge_portfolio_with_universe
 
 OBJECTIVE_MAP = {
     "retirement": {
@@ -128,7 +128,6 @@ class Optimser:
     def __init__(
         self,
         portfolio: list | pd.DataFrame,
-        universe: list | pd.DataFrame,
         delta_value: float = 0, # target change in portfolio value
         objective: str = 'retirement',
         preferences: Dict[str, str] = {},
@@ -138,9 +137,9 @@ class Optimser:
         formula: str = 'treynor'
     ):
         self.portfolio = portfolio if type(portfolio) == pd.DataFrame else pd.DataFrame.from_records(portfolio)
-        self.universe = universe if type(universe) == pd.DataFrame else pd.DataFrame.from_records(universe)
+        self.universe = get_universe()
         # merge portfolio and universe to get working portfolio
-        wp = merge_portfolio_with_universe(universe, portfolio)
+        wp = merge_portfolio_with_universe(self.universe, portfolio)
         self.wp = wp
         # define inital portfolio
         self.a0 = wp['units'] * wp['previousClose']
@@ -198,10 +197,10 @@ class Optimser:
 
         # yield constraint
         yield_cons = []
-        target_div_yield = OBJECTIVE_MAP[self.objective]["target_div_yield"]
-        if target_div_yield is not None:
-            div_yield = df["div_yield"].fillna(0)
-            yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_div_yield-0.01), self.target*(target_div_yield+0.01))] # error for dividends is 1%
+        # target_div_yield = OBJECTIVE_MAP[self.objective]["target_div_yield"]
+        # if target_div_yield is not None:
+        #     div_yield = df["div_yield"].fillna(0)
+        #     yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_div_yield-0.01), self.target*(target_div_yield+0.01))] # error for dividends is 1%
 
         # active constraint
         # active_cons = []
@@ -298,9 +297,6 @@ class Optimser:
         ub = self.target * np.ones(len(df))
         # set keep_feasible True to ensure iterations remain within bounds
         bnds = Bounds(lb, ub, keep_feasible=True)
-
-        # utility function arguments
-        df['exp_return'] = df.apply(lambda x: x['priceTarget'] / x['previousClose'] - 1, axis=1)
 
         # first guess for minimiser is equal weight
         equal_weight = self.target * np.ones(len(df)) / len(df)
