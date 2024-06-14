@@ -1,5 +1,7 @@
+from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import backref, relationship
+
 from database import Base
-from sqlalchemy import Column, Integer, String, Float
 
 class Stock(Base):
     __tablename__ = 'Stock'
@@ -18,5 +20,5 @@ class Stock(Base):
 class Holding(Base):
     __tablename__ = 'Holding'
     id = Column(Integer, primary_key=True)
-    symbol = Column(String)
     units = Column(Integer)
+    stockId = Column(String, ForeignKey('Stock.id'))

@@ -17,6 +17,9 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 resolve_image_repos = true
+stack_name = "Advice"
+s3_prefix = "Advice"
+region = "ap-southeast-2"
 
 [default.package.parameters]
 resolve_s3 = true

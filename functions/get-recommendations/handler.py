@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from universe import get_universe
 from optimiser import Optimser
+from database import SessionLocal
+import crud
 
 from pydantic import BaseModel
 
@@ -26,19 +27,18 @@ def handler(event, context):
 
     try:
         target = event["body"]["target"] # target funds to raise, defaults to zero
-        holdings = event["body"]["holdings"] # array of user's holdings
-        portfolio, universe = pd.DataFrame.from_records(holdings), get_universe()
+
+        db = SessionLocal()
+        current_portfolio, universe = pd.DataFrame.from_records(crud.get_holdings(db)), pd.DataFrame.from_records(crud.get_stocks(db))
 
         # initialise optimiser
-        optimiser = Optimser(portfolio, universe)
+        optimiser = Optimser(current_portfolio, universe)
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio()
-        # get initial and final adjusted utility
-        initial_adj_utility, final_adj_utility = optimiser.initial_adj_utility, optimiser.final_adj_utility
 
         # merge optimal and current portfolio into one df
         df = pd.merge(
-            portfolio[["symbol", "units"]],
+            current_portfolio[["symbol", "units"]],
             optimal_portfolio[["symbol", "units", "name", "previousClose"]],
             how="outer",
             on="symbol",
@@ -83,6 +83,9 @@ def handler(event, context):
                 partial_row['units'] = np.copysign(np.ceil((np.abs(target - value)) / row['previousClose']), v)
                 transactions.loc[index,:] = partial_row
                 break
+
+        # get adjusted utility before and after recommended transactions
+        initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
 
         return {
             "body": {

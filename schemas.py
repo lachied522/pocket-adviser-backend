@@ -18,8 +18,11 @@ class Stock(BaseModel):
 
 class Holding(BaseModel):
     id: int
-    symbol: str
     units: int
+    stockId: str
+    
+    class Config:
+        from_attributes = True
 
 class PopulatedHolding(Stock, Holding):
     pass
