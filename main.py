@@ -8,9 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy.orm import Session
 
-import schemas, crud, helpers
+import schemas
 from database import SessionLocal
-from optimiser import Optimser
+from optimiser import Optimser, OBJECTIVE_MAP
+from helpers import get_holdings_and_profile, get_stock_from_universe
 
 import traceback
 
@@ -54,47 +55,82 @@ def get_advice_by_stock(
     """
     try:
         # check that symbol is valid
-        stock = crud.get_stock_by_symbol(body.symbol, db)
+        # TO DO: accomodate non-NASDAQ symbols, e.g. "BHP.AX"
+        stock = get_stock_from_universe(body.symbol, db)
         if not stock:
             return {
-                "message": f"{body.symbol} was not found",
+                "message": f"Symbol {body.symbol} was not found",
                 "statusCode": 400
             }
 
         # fetch data
-        current_portfolio, profile = helpers.get_holdings_and_profile(userId, db)
+        current_portfolio, profile = get_holdings_and_profile(userId, db)
+
+        # get proposed number of units by dividing by previousClose
+        proposed_units = round(body.amount / stock["previousClose"])
+        # check if existing holding
+        existing_holding = current_portfolio[current_portfolio["stockId"] == stock["id"]]
+        is_existing = not existing_holding.empty
+        # edge case where user wishes to sell stock not in portfolio
+        if proposed_units < 0 and not is_existing:
+            # TO DO
+            return {
+                "result": False,
+                "message": "User does not hold {symbol}".format(symbol=stock["symbol"])
+            }
+        
+        # check proposed transaction against sector allocations
+        objective = profile.objective if profile else "RETIREMENT"
+#         target_allocation = OBJECTIVE_MAP[objective].get(stock.sector)
+#         if target_allocation is not None:
+#             current_allocation = np.sum([row["units"] * row.last_price for _, row in wp[wp.sector==sector].iterrows()])
+#             if current_allocation + amount > target_allocation:
+#                 return {
+#                     "result": False,
+#                     "message": """\
+# User's current allocation to sector {sector} is {current_weight}%. Investment would bring allocation to {proposed_weight}%. \
+# Given investment objective of {objective}, the transaction is not recommended. \
+# User may consider buying shares in another sector.""".format(
+#                         sector=sector,
+#                         current_weight=np.round(100*current_allocation / self.value, 2),
+#                         proposed_weight=np.round(100*(current_allocation + amount) / (self.value + amount), 2),
+#                         objective=self.objective,
+#                     )
+#                 }
 
         # initialise optimiser
-        optimiser = Optimser(current_portfolio)
+        optimiser = Optimser(current_portfolio, profile)
 
         # get initial adjusted utility
         initial_adj_utility = optimiser.get_utility(current_portfolio)
         
         # get adjusted utility after proposed transaction
-        units = round(body.amount / stock["previousClose"])
         final_portfolio = current_portfolio.copy()
-        final_portfolio.set_index('stockId', inplace=True)
-        if stock.id in current_portfolio.index:
+        if is_existing:
             # update existing row
-            final_portfolio.loc[stock.id, 'units'] = max(current_portfolio.loc[stock.id]['units'] + units, 0)
+            index = existing_holding.index[0]
+            final_portfolio.loc[index, "units"] = max(existing_holding["units"].iloc[0] + proposed_units, 0)
         else:
             # insert new row
-            final_portfolio.loc[stock.id] = { "units": units }
+            final_portfolio.loc[-1] = { "stockId": stock["id"], "units": proposed_units }
 
         final_adj_utility = optimiser.get_utility(final_portfolio)
-           
+        
         return json.dumps({
+            "stockId": stock["id"],
+            "symbol": stock["symbol"],
+            "name": stock["name"],
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility
         })
     
     except Exception as e:
-        # any other error
-        print(e)
+        traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
-@app.post("/get-recommendations")
+@app.post("/get-recommendations/{userId}")
 def get_recommendations(
+    userId: str,
     body: schemas.GetRecommendationsRequest,
     response: Response,
     db: Session = Depends(get_db)
@@ -110,10 +146,10 @@ def get_recommendations(
     """
     try:
         delta_value = body.target
-        current_portfolio = helpers.get_portfolio(db)
+        current_portfolio, profile = get_holdings_and_profile(userId, db)
         
         # initialise optimiser
-        optimiser = Optimser(current_portfolio, delta_value)
+        optimiser = Optimser(current_portfolio, profile, delta_value)
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio()
 

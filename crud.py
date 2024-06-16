@@ -8,7 +8,7 @@ def get_all_stocks(db: Session):
      
 def get_stock_by_symbol(symbol: str, db: Session):
     # fetch stock where symbol matches param
-    return db.query(models.Stock).filter(models.Stock.symbol == symbol.lower()).first()
+    return db.query(models.Stock).filter(models.Stock.symbol == symbol.upper()).first()
 
 def get_holdings_by_user_id(userId: str, db: Session):
     # fetch all holding records

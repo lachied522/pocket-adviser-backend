@@ -8,6 +8,8 @@ class Stock(BaseModel):
     symbol: str
     name: str
     exchange: str
+    country: str
+    isEtf: bool
     previousClose: float
     priceTarget: float
     beta: Optional[float]

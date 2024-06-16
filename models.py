@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
 from sqlalchemy.orm import backref, relationship
 from sqlalchemy.types import JSON
 
@@ -25,6 +25,8 @@ class Stock(Base):
     symbol = Column(String)
     name = Column(String)
     exchange = Column(String)
+    country = Column(String)
+    isEtf = Column(Boolean)
     previousClose = Column(Float, nullable=True)
     priceTarget = Column(Float)
     beta = Column(Float, nullable=True)

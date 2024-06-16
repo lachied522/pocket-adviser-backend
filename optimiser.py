@@ -4,105 +4,106 @@ import pandas as pd
 import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
-from helpers import get_universe, merge_portfolio_with_universe
+from helpers import get_universe, get_riskfree_rate, merge_portfolio_with_universe
+from schemas import Profile
 
 OBJECTIVE_MAP = {
-    "retirement": {
+    "RETIREMENT": {
         "target_beta": 1.25,
         "beta_quantiles": [0.25, 1.0], # quantile of beta for stocks
         "target_div_yield": 0.02,
         "target_sector_allocation": {
-            "basic-materials": 0.0191,
-            "financial-services": 0.0747,
-            "healthcare": 0.1740,
-            "energy": 0.0698,
-            "consumer-cyclical": 0.1046,
-            "communication-services": 0.0780,
-            "industrials": 0.0511,
-            "consumer-defensive": 0.0646,
-            "real-estate": 0.0084,
-            "technology": 0.3485,
-            "utilities": 0.005
+            "Basic Materials": 0.0191,
+            "Financial Services": 0.0747,
+            "Healthcare": 0.1740,
+            "Energy": 0.0698,
+            "Consumer Cyclical": 0.1046,
+            "Communication Services": 0.0780,
+            "Industrials": 0.0511,
+            "Consumer Defensive": 0.0646,
+            "Real Estate": 0.0084,
+            "Technology": 0.3485,
+            "Utilities": 0.005
             # https://www.ishares.com/us/products/239725/ishares-sp-500-growth-etf
         }
     },
-    "income": {
+    "INCOME": {
         "target_beta": 0.75,
         "beta_quantiles": [0, 0.75],
         "target_div_yield": 0.05,
         "target_sector_allocation": {
-            "basic-materials": 0.0754,
-            "financial-services": 0.2565,
-            "healthcare": 0.0097,
-            "energy": 0.0505,
-            "consumer-cyclical": 0.0635,
-            "communication-services": 0.0530,
-            "industrials": 0.1240,
-            "consumer-defensive": 0.0611,
-            "real-estate": 0.1543,
-            "technology": 0.0395,
-            "utilities": 0.1124
+            "Basic Materials": 0.0754,
+            "Financial Services": 0.2565,
+            "Healthcare": 0.0097,
+            "Energy": 0.0505,
+            "Consumer Cyclical": 0.0635,
+            "Communication Services": 0.0530,
+            "Industrials": 0.1240,
+            "Consumer Defensive": 0.0611,
+            "Real Estate": 0.1543,
+            "Technology": 0.0395,
+            "Utilities": 0.1124
             # https://www.ssga.com/au/en_gb/intermediary/etfs/funds/spdr-sp-global-dividend-fund-wdiv
         }
     },
-    "preservation": {
+    "PRESERVATION": {
         "target_beta": 0.50,
         "beta_quantiles": [0, 0.75],
         "target_div_yield": 0.03,
         "target_sector_allocation": {
-            "basic-materials": 0.0032,
-            "financial-services": 0.1160,
-            "healthcare": 0.1430,
-            "energy": 0.025,
-            "consumer-cyclical": 0.130,
-            "communication-services": 0.093,
-            "industrials": 0.110,
-            "consumer-defensive": 0.122,
-            "real-estate": 0.009,
-            "technology": 0.140,
-            "utilities": 0.08
+            "Basic Materials": 0.0032,
+            "Financial Services": 0.1160,
+            "Healthcare": 0.1430,
+            "Energy": 0.025,
+            "Consumer Cyclical": 0.130,
+            "Communication Services": 0.093,
+            "Industrials": 0.110,
+            "Consumer Defensive": 0.122,
+            "Real Estate": 0.009,
+            "Technology": 0.140,
+            "Utilities": 0.08
             # https://www.vanguard.com.au/personal/invest-with-us/etf?portId=8201
         }
     },
-    "first-home": {
+    "FIRSTHOME": {
         "target_beta": 1.1,
         "beta_quantiles": [0.25, 0.9],
         "target_div_yield": 0.01,
         "target_sector_allocation": {
-            "basic-materials": 0.0242,
-            "financial-services": 0.1296,
-            "healthcare": 0.1337,
-            "energy": 0.0457,
-            "consumer-cyclical": 0.1067,
-            "communication-services": 0.0877,
-            "industrials": 0.0826,
-            "consumer-defensive": 0.0666,
-            "real-estate": 0.0240,
-            "technology": 0.2708,
-            "utilities": 0.0257
+            "Basic Materials": 0.0242,
+            "Financial Services": 0.1296,
+            "Healthcare": 0.1337,
+            "Energy": 0.0457,
+            "Consumer Cyclical": 0.1067,
+            "Communication Services": 0.0877,
+            "Industrials": 0.0826,
+            "Consumer Defensive": 0.0666,
+            "Real Estate": 0.0240,
+            "Technology": 0.2708,
+            "Utilities": 0.0257
             # https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf
         }
     },
-    "children": {
+    "CHILDREN": {
         "target_beta": 1.25,
         "beta_quantiles": [0.25, 0.9],
         "target_div_yield": 0.02,
         "target_sector_allocation": {
-            "basic-materials": 0.0157,
-            "financial-services": 0.1000,
-            "healthcare": 0.1284,
-            "energy": 0.0593,
-            "consumer-cyclical": 0.1081,
-            "communication-services": 0.0868,
-            "industrials": 0.0447,
-            "consumer-defensive": 0.0950,
-            "real-estate": 0.0038,
-            "technology": 0.3494,
-            "utilities": 0.0062
+            "Basic Materials": 0.0157,
+            "Financial Services": 0.1000,
+            "Healthcare": 0.1284,
+            "Energy": 0.0593,
+            "Consumer Cyclical": 0.1081,
+            "Communication Services": 0.0868,
+            "Industrials": 0.0447,
+            "Consumer Defensive": 0.0950,
+            "Real Estate": 0.0038,
+            "Technology": 0.3494,
+            "Utilities": 0.0062
             # https://www.ishares.com/us/products/239737/ishares-global-100-etf
         }
     },
-    "trading": {
+    "TRADING": {
         "target_beta": 1.5,
         "beta_quantiles": [0.0, 1.0],
         "target_div_yield": None, # no target div yield for trading
@@ -113,14 +114,14 @@ OBJECTIVE_MAP = {
 
 class Optimser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
+    profile: Profile | None
+    objective: str
     universe: pd.DataFrame # stock data for all available stocks in universe
     wp: pd.DataFrame # combined universe and portfolio were units is zero for stocks not held
     target: float # target portfolio value
-    delta_value: float # target change in portfolio value
-    objective: str = 'retirement' # user objective - is key of OBJECTIVE_MAP
-    preferences: Dict[str, str] = {} # user preferences of form { [sector]: 'like'|'dislike' }
+    delta_value: float = 0 # target change in portfolio value
     error: float = 0.03 # margin for error when using target weights or amounts
-    bias: float = 0.01 # bias placed on stocks based on preferences
+    bias: float = 0.05 # bias placed on stocks based on preferences
     threshold: float = 0.05 # minimum weight for stock to be included in optimal portfolio
     a0: pd.Series
     formula: str = 'treynor' # formula used for utility function
@@ -128,15 +129,17 @@ class Optimser:
     def __init__(
         self,
         portfolio: list | pd.DataFrame,
+        profile: Profile | None,
         delta_value: float = 0, # target change in portfolio value
-        objective: str = 'retirement',
-        preferences: Dict[str, str] = {},
         error: float = 0.03,
-        bias: float = 0.01,
+        bias: float = 0.05,
         threshold: float = 0.05,
         formula: str = 'treynor'
     ):
         self.portfolio = portfolio if type(portfolio) == pd.DataFrame else pd.DataFrame.from_records(portfolio)
+        self.objective = profile.objective if profile else "RETIREMENT"
+        self.profile = profile
+        # get universe
         self.universe = get_universe()
         # merge portfolio and universe to get working portfolio
         wp = merge_portfolio_with_universe(self.universe, portfolio)
@@ -146,9 +149,6 @@ class Optimser:
         # set target value for portfolio as current portfolio value plus delta
         self.delta_value = delta_value
         self.target = (wp['units'] * wp['previousClose']).sum() + delta_value
-        # set objective and preferences
-        self.objective = objective
-        self.preferences = preferences
 
         self.error = error
         self.bias = bias
@@ -165,14 +165,15 @@ class Optimser:
         """
         Inverse utility function for optimisation.
         """
-        r_f, MRP = 0.05, 0.08 # TO DO
+        r_f = get_riskfree_rate() # TO DO
         match self.formula:
             case 'treynor':
                 # Treynor ratio = (r_p - r_f) / Beta_p
                 # see https://www.investopedia.com/terms/t/treynorratio.asp
-                r_p = np.dot(a, df["exp_return"] + np.array(additional_factors).sum(axis=0))
+                r_p = np.dot(a, df["expReturn"] + np.array(additional_factors).sum(axis=0))
                 Beta_p = np.dot(a, df["beta"])
-                U = (r_p - r_f) / Beta_p
+                # prevent divide by zero by adding small amount to beta
+                U = (r_p - r_f) / (Beta_p if Beta_p != 0 else 0.01)
 
             case 'sharpe':
                 # Sharpe ratio = (r_p - r_f) / Sigma_p, see https://www.investopedia.com/terms/t/treynorratio.asp
@@ -183,9 +184,83 @@ class Optimser:
         # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
         # this doesn't appear to work very well as weights close 0 and 5% are generated frequently
         # and deviations from current values are common
-
         penalty = 2 * (np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int)) + np.dot(a, a - self.a0 != 0)) / self.target
         return -(U-penalty)
+    
+    def apply_filters(self, df: pd.DataFrame):
+        """
+        Filters working portfolio based on investment style.
+        """
+        # handle edge cases
+        if self.profile.passive == 1:
+            # portfolio is all ETFs, direct equities can be removed.
+            return df.drop(df[df['isEtf']==True].index)
+
+        # extract beta thresholds from profile
+        beta_thresholds = OBJECTIVE_MAP[self.objective]["beta_quantiles"]
+        match self.objective:
+            # filter working portfolio based on objective
+            # case 'RETIREMENT':
+            #     # calculate growth rates
+            #     wp['growth'] = wp.apply(lambda x: (x['forward_EPS'] / x['trailing_EPS']) - 1 if x['forward_EPS'] and x['trailing_EPS'] else None, axis=1)
+            #     # calculate PEG ratios
+            #     wp['PEG'] = wp.apply(lambda x: x['PE'] / x['growth'] if x['PE'] and x['growth'] else None, axis=1)
+
+            #     for sector in wp['sector'].unique():
+            #         # filter stocks on per sector basis to preserve sector allocation
+            #         if sector is not None:
+            #             sector_mask = wp["sector"]==sector
+            #             # cut stocks that are in bottom 50% of PEG
+            #             lower_PEG = wp[sector_mask]['PEG'].median()
+            #             PEG_filter = wp['PEG'] < lower_PEG
+            #             # cut stocks that are outside quantiles for beta
+            #             lower_beta = wp[sector_mask]['beta'].quantile(beta_thresholds[0])
+            #             upper_beta = wp[sector_mask]['beta'].quantile(beta_thresholds[1])
+            #             beta_filter = (wp[sector_mask]['beta'] < lower_beta) | (wp[sector_mask]['beta'] > upper_beta)
+                        
+            #             combined_filter = sector_mask & (PEG_filter | beta_filter)
+
+            #             wp = wp.drop(wp[combined_filter & ~wp['locked']].index)
+
+            case _:
+                # filter stocks on per sector basis to preserve sector allocation
+                for sector in df["sector"].unique():
+                    if sector is not None:
+                        sector_mask = df["sector"]==sector
+                        # cut stocks that are outside quantiles for beta
+                        lower_beta = df[sector_mask]["beta"].quantile(beta_thresholds[0])
+                        upper_beta = df[sector_mask]["beta"].quantile(beta_thresholds[1])
+                        beta_filter = (df[sector_mask]["beta"] < lower_beta) | (df[sector_mask]["beta"] > upper_beta)
+                        
+                        df = df.drop(df[beta_filter].index)
+
+        return df
+    
+    def get_sector_allocation(self):
+        """
+        Returns target sector allocation for optimisation based on objective and preferences if any.
+        """
+        targets = OBJECTIVE_MAP[self.objective]["target_sector_allocation"]
+
+        if targets is None:
+            # occurs when objective is TRADING
+            return None
+
+        if self.profile.preferences is not None:
+            for key, value in self.profile.preferences.items():
+                if key in targets:
+                    if value == "like":
+                        # bias up sector
+                        targets[key] += 0.05
+                    else:
+                        # bias down sector
+                        targets[key] = max(targets[key] - 0.05, 0)
+
+            # ensure sector weights sum to 1
+            s = sum(targets.values())
+            targets = {k: v / s for k, v in targets.items()}
+        
+        return targets
 
     def get_constraints(self, df: pd.DataFrame):
         """
@@ -197,20 +272,21 @@ class Optimser:
 
         # yield constraint
         yield_cons = []
-        # target_div_yield = OBJECTIVE_MAP[self.objective]["target_div_yield"]
-        # if target_div_yield is not None:
-        #     div_yield = df["div_yield"].fillna(0)
-        #     yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_div_yield-0.01), self.target*(target_div_yield+0.01))] # error for dividends is 1%
+        target_div_yield = OBJECTIVE_MAP[self.objective]["target_div_yield"]
+        if target_div_yield is not None:
+            # TO DO: get div_yield!
+            div_yield = np.random.uniform(low=0, high=5, size=len(df))
+            yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_div_yield-0.01), self.target*(target_div_yield+0.01))] # error for dividends is 1%
 
-        # active constraint
-        # active_cons = []
-        # target_active = self.target_active
-        # if 0 < target_active and target_active < 1:
-        #     active = np.array(wp['active']==True).astype(int)
-        #     active_cons = [LinearConstraint(active, value*max(0, target_active-error), value*min(1, target_active+error))]
+        # passive constraint
+        passive_cons = []
+        target_passive = self.profile.passive
+        if 0 < target_passive and target_passive < 1:
+            passive = np.array(df['isEtf']==True).astype(int)
+            passive_cons = [LinearConstraint(passive, self.target*max(0, passive-self.error), self.target*min(1, passive+self.error))]
 
         # domestic constraint
-        # domestic_cons = []
+        domestic_cons = [] # TO DO
 
         # constrain weight of 'locked' holdings
         # locked_cons = []
@@ -224,7 +300,7 @@ class Optimser:
 
         # sector constraints
         sector_cons = []
-        sector_allocation_map = OBJECTIVE_MAP[self.objective]["target_sector_allocation"]
+        sector_allocation_map = self.get_sector_allocation()
         if sector_allocation_map is not None:
             # avoid multi collinearity by removing one of the sectors
             target_sectors = list(sector_allocation_map.items())[:-1]
@@ -253,8 +329,9 @@ class Optimser:
         return tuple(
             sum_cons +
             yield_cons +
-            sector_cons
-            # domestic_cons
+            passive_cons +
+            sector_cons +
+            domestic_cons
             # locked_cons
         )
 
@@ -264,8 +341,8 @@ class Optimser:
         # additional_factors.append(self.bias * np.array(df['tags'].apply(lambda x: 'Featured' in x)))
 
         # user preferences
-        if self.preferences is not None:
-            for sector, preference in self.preferences.items():
+        if self.profile.preferences is not None:
+            for sector, preference in self.profile.preferences.items():
                 factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
 
                 if preference=="dislike":
@@ -320,4 +397,4 @@ class Optimser:
         wp = merge_portfolio_with_universe(self.universe, portfolio)
         # extract amount
         a = wp["units"].fillna(0) * wp["previousClose"]
-        return -self.inv_utility_function(a, self.wp, self.get_additional_factors(portfolio))
+        return -self.inv_utility_function(a, self.wp, self.get_additional_factors(wp))
