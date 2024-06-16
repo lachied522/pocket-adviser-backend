@@ -1,5 +1,5 @@
 
-from typing import Optional
+from typing import Optional, List, Dict
 
 from pydantic import BaseModel
 
@@ -7,6 +7,7 @@ class Stock(BaseModel):
     id: int
     symbol: str
     name: str
+    exchange: str
     previousClose: float
     priceTarget: float
     beta: Optional[float]
@@ -20,7 +21,27 @@ class Holding(BaseModel):
     id: int
     units: int
     stockId: str
+    userId: str
     
+    class Config:
+        from_attributes = True
+
+class Profile(BaseModel):
+    userId: str
+    objective: str|None
+    passive: float|None
+    international: float|None
+    preferences: Dict[str, str]
+
+    class Config:
+        from_attributes = True
+
+class User(BaseModel):
+    id: str
+
+    holdings: List[Holding]
+    profile: Optional[Profile]
+
     class Config:
         from_attributes = True
 
@@ -32,4 +53,4 @@ class GetAdviceByStockRequest(BaseModel):
     amount: float
 
 class GetRecommendationsRequest(BaseModel):
-    delta_value: float
+    target: float # target amount to withdraw (negative) or deposit (positive)

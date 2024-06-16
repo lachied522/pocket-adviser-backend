@@ -1,14 +1,31 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import backref, relationship
+from sqlalchemy.types import JSON
 
 from database import Base
+
+class User(Base):
+    __tablename__ = 'User'
+    id = Column(String, primary_key=True)
+
+    profile = relationship('Profile', backref=backref('user'), lazy='joined')
+    holdings = relationship('Holding', backref=backref('user'), lazy='joined')
+
+class Profile(Base):
+    __tablename__ = 'Profile'
+    userId = Column(String, ForeignKey('User.id'), primary_key=True)
+    objective = Column(String, nullable=True)
+    passive = Column(Float, nullable=True)
+    international = Column(Float, nullable=True)
+    preferences = Column(JSON)
 
 class Stock(Base):
     __tablename__ = 'Stock'
     id = Column(Integer, primary_key=True)
     symbol = Column(String)
     name = Column(String)
-    previousClose = Column(Float)
+    exchange = Column(String)
+    previousClose = Column(Float, nullable=True)
     priceTarget = Column(Float)
     beta = Column(Float, nullable=True)
     dividendAmount = Column(Float, nullable=True)
@@ -22,3 +39,4 @@ class Holding(Base):
     id = Column(Integer, primary_key=True)
     units = Column(Integer)
     stockId = Column(String, ForeignKey('Stock.id'))
+    userId = Column(String, ForeignKey('User.id'))

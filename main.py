@@ -2,12 +2,14 @@ import json
 import pandas as pd
 import numpy as np
 
-from fastapi import FastAPI, Request, WebSocket, Header, Response, HTTPException, WebSocketDisconnect, status
+from fastapi import FastAPI, Request, WebSocket, Header, Response, Depends, HTTPException, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy.orm import Session
+
 import schemas, crud, helpers
-from database import SessionManager
+from database import SessionLocal
 from optimiser import Optimser
 
 import traceback
@@ -22,14 +24,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        print('db closing')
+        db.close()
+
 @app.get("/")
 def root():
     return json.dumps("Hello World")
 
-@app.post("/get-advice-by-stock")
+@app.post("/get-advice-by-stock/{userId}")
 def get_advice_by_stock(
+    userId: str,
     body: schemas.GetAdviceByStockRequest,
-    response: Response
+    response: Response,
+    db: Session = Depends(get_db)
 ):
     """
     Provides information on whether a transaction of amount (amount) in stock (symbol) is recommended \
@@ -42,7 +54,7 @@ def get_advice_by_stock(
     """
     try:
         # check that symbol is valid
-        stock = crud.get_stock_by_symbol(body.symbol)
+        stock = crud.get_stock_by_symbol(body.symbol, db)
         if not stock:
             return {
                 "message": f"{body.symbol} was not found",
@@ -50,7 +62,7 @@ def get_advice_by_stock(
             }
 
         # fetch data
-        current_portfolio = helpers.get_portfolio()
+        current_portfolio, profile = helpers.get_holdings_and_profile(userId, db)
 
         # initialise optimiser
         optimiser = Optimser(current_portfolio)
@@ -69,7 +81,7 @@ def get_advice_by_stock(
             # insert new row
             final_portfolio.loc[stock.id] = { "units": units }
 
-        final_adj_utility = optimiser.get_utility()
+        final_adj_utility = optimiser.get_utility(final_portfolio)
            
         return json.dumps({
             "initial_adj_utility": initial_adj_utility,
@@ -85,6 +97,7 @@ def get_advice_by_stock(
 def get_recommendations(
     body: schemas.GetRecommendationsRequest,
     response: Response,
+    db: Session = Depends(get_db)
 ):
     """
     Provides information on whether a transaction of amount (amount) in stock (symbol) is recommended \
@@ -96,10 +109,8 @@ def get_recommendations(
     2. Utility of portfolio before and after proposed transaction.
     """
     try:
-        SessionManager()
-
-        delta_value = body.delta_value
-        current_portfolio = helpers.get_portfolio()
+        delta_value = body.target
+        current_portfolio = helpers.get_portfolio(db)
         
         # initialise optimiser
         optimiser = Optimser(current_portfolio, delta_value)
