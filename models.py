@@ -24,6 +24,7 @@ class Stock(Base):
     id = Column(Integer, primary_key=True)
     symbol = Column(String)
     name = Column(String)
+    description = Column(String)
     exchange = Column(String)
     country = Column(String)
     isEtf = Column(Boolean)

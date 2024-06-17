@@ -7,6 +7,7 @@ class Stock(BaseModel):
     id: int
     symbol: str
     name: str
+    description: str
     exchange: str
     country: str
     isEtf: bool
