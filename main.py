@@ -5,11 +5,16 @@ import numpy as np
 from fastapi import FastAPI, Request, WebSocket, Header, Response, Depends, HTTPException, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from sqlalchemy.orm import Session
 
-import schemas
+from schemas import GetRecommendationsRequest, GetAdviceByStockRequest
 from database import SessionLocal
+from cron import schedule_jobs
+
 from optimiser import Optimser
 from params import OBJECTIVE_MAP
 from helpers import get_holdings_and_profile, get_stock_by_symbol, get_sector_allocation
@@ -34,6 +39,20 @@ def get_db():
         print('db closing')
         db.close()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("App running")
+    
+    scheduler = AsyncIOScheduler()
+    # add jobs to scheduler
+    schedule_jobs(scheduler)
+    # start scheduler
+    scheduler.start()
+    print("Scheduler started")
+    
+    yield
+    print("App Shutdown")
+
 @app.get("/")
 def root():
     return json.dumps("Hello World")
@@ -41,7 +60,7 @@ def root():
 @app.post("/get-advice-by-stock/{userId}")
 def get_advice_by_stock(
     userId: str,
-    body: schemas.GetAdviceByStockRequest,
+    body: GetAdviceByStockRequest,
     response: Response,
     db: Session = Depends(get_db)
 ):
@@ -82,7 +101,7 @@ def get_advice_by_stock(
             }
 
         # check whether proposed transaction is within sector allocations
-        is_within_sector_target = True
+        is_recommended_by_sector_allocation = True
         sector_allocation_message = "The proposed transaction is within the user's recommended sector allocation based on their objective and preferences. "
         if not stock["sector"] or objective == "TRADING":
             pass
@@ -92,14 +111,14 @@ def get_advice_by_stock(
             proposed_allocation = current_allocation + body.amount
             if proposed_allocation > target_allocation:
                 # proposed transaction is within sector allocations
-                is_within_sector_target = False
+                is_recommended_by_sector_allocation = False
                 sector_allocation_message = (
                     "The proposed transaction is outside the user's recommended sector allocation based on their objective and preferences. " +
                     "User may consider doing something in another sector. "
                 )
 
         # check whether stock is within recommendations for risk as measured by beta
-        is_within_risk_target = True
+        is_recommended_by_risk = True
         risk_message = "The risk (Beta) of the stock appears to be inline with the user's investment objective."
         if objective == "TRADING":
             # trading objective should have no requirements for beta
@@ -111,37 +130,36 @@ def get_advice_by_stock(
             # check whether stock beta is within reasonable distance from target beta
             difference = stock["beta"] - target_beta
             if abs(difference) > 0.50:
-                is_within_risk_target = proposed_units < 0 # True if user wishes to sell
+                is_recommended_by_risk = proposed_units < 0 # True if user wishes to sell
                 risk_message = (
                     "Given the user's investment objective, the risk of (Beta) of the stock appears to be significantly {} than recommended. ".format("greater" if difference > 0 else "lower")
                 )
 
         # check whether stock is within recommendations for income
-        is_within_income_target = True
+        is_recommended_by_income = True
         income_message = "The dividend yield of the stock appears to be inline with the user's investment objective. "
         if objective == "TRADING":
             pass
-        elif not stock["dividendAmount"]:
-            income_message = "Dividend information is not available for this stock. "
+        elif not stock["dividendYield"]:
+            is_recommended_by_income = "Dividend information is not available for this stock. "
         else:
-            pass
-            # target_yield = OBJECTIVE_MAP[objective]["target_yield"]
-            # # check whether stock yield is within reasonable distance from target
-            # difference = stock["dividendAmount"] - target_yield
-            # if abs(difference) > 0.50:
-            #     is_within_risk_target = proposed_units < 0 # True if user wishes to sell
-            #     risk_message = (
-            #         "Given the user's investment objective, the risk of (Beta) of the stock appears to be significantly {f} than recommended. ".format("greater" if difference > 0 else "lower")
-            #     )
+            target_yield = OBJECTIVE_MAP[objective]["target_yield"]
+            # check whether stock yield is within reasonable distance from target
+            difference = stock["dividendYield"] - target_yield
+            if abs(difference) > 0.50:
+                is_recommended_by_income = proposed_units < 0 # True if user wishes to sell
+                risk_message = (
+                    "Given the user's investment objective, the risk of (Beta) of the stock is significantly {f} than recommended. ".format("greater" if difference > 0 else "lower")
+                )
 
         # check whether proposed transaction is analyst recommended
-        is_analyst_recommended = True
+        is_recommended_by_analyst = True
         analyst_recommendation_message = ""
         if not stock["priceTarget"]:
-            is_analyst_recommended = False
+            is_recommended_by_analyst = False
             analyst_recommendation_message = "Analyst price target is not available for this stock, so we cannot provide a recommendation."
         else:
-            is_analyst_recommended = stock["priceTarget"] < stock["previousClose"] if body.amount < 0 else stock["priceTarget"] > stock["previousClose"]
+            is_recommended_by_analyst = stock["priceTarget"] < stock["previousClose"] if body.amount < 0 else stock["priceTarget"] > stock["previousClose"]
             analyst_recommendation_message = (
                 "Analyst's have a price target of {} ".format(stock["priceTarget"]) +
                 "which is {}% {} the previous close. ".format(
@@ -175,11 +193,12 @@ def get_advice_by_stock(
         )
 
         # append messages together
-        is_recommended = is_within_sector_target and is_within_risk_target and is_analyst_recommended and is_utility_positive
+        is_recommended = is_recommended_by_sector_allocation and is_recommended_by_risk and is_recommended_by_income and is_recommended_by_analyst and is_utility_positive
         message = (
             "The proposed transaction is {} for the user. This conclusion was made by assessing the following factors jointly.".format("recommended" if is_recommended else "not recommended") +
             "\n\nAnalyst recommendation:\n\n" + analyst_recommendation_message +
             "\n\nSector allocation:\n\n" + sector_allocation_message +
+            "\n\nIncome:\n\n" + income_message +
             "\n\nRisk assessment:\n\n" + risk_message +
             "\n\nPortfolio utility:\n\n" + utility_message
         )
@@ -188,8 +207,10 @@ def get_advice_by_stock(
             "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} ${body.amount} in {body.symbol}",
             "is_recommended": is_recommended,
             "message": message,
-            "is_within_sector_target": is_within_sector_target,
-            "is_analyst_recommended": is_analyst_recommended,
+            "is_recommended_by_sector_allocation": is_recommended_by_sector_allocation,
+            "is_recommended_by_risk": is_recommended_by_risk,
+            "is_recommended_by_income": is_recommended_by_income,
+            "is_analyst_recommended": is_recommended_by_analyst,
             "is_utility_positive": is_utility_positive,
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility,
@@ -203,7 +224,7 @@ def get_advice_by_stock(
 @app.post("/get-recommendations/{userId}")
 def get_recommendations(
     userId: str,
-    body: schemas.GetRecommendationsRequest,
+    body: GetRecommendationsRequest,
     response: Response,
     db: Session = Depends(get_db)
 ):

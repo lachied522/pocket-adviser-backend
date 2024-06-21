@@ -8,15 +8,19 @@ class Stock(BaseModel):
     symbol: str
     name: str
     description: str
+    image: Optional[str]
     exchange: str
-    country: str
+    currency: str
+    country: Optional[str]
     isEtf: bool
-    previousClose: float
-    priceTarget: float
+    previousClose: Optional[float]
+    changesPercentage: Optional[float]
+    priceTarget: Optional[float]
     beta: Optional[float]
     dividendAmount: Optional[float]
+    dividendYield: Optional[float]
     marketCap: float
-    sector: str
+    sector: Optional[str]
     pe: Optional[float]
     epsGrowth: Optional[float]
 

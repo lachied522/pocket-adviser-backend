@@ -171,8 +171,7 @@ class Optimser:
         yield_cons = []
         target_yield = OBJECTIVE_MAP[self.objective]["target_yield"]
         if target_yield is not None:
-            # TO DO: get div_yield!
-            div_yield = np.random.uniform(low=0, high=5, size=len(df))
+            div_yield = df['dividendYield'].fillna(0)
             yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_yield-0.01), self.target*(target_yield+0.01))] # error for dividends is 1%
 
         # passive constraint
