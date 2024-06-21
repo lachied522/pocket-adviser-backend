@@ -64,8 +64,6 @@ def get_advice_by_stock(
                 "statusCode": 400
             }
 
-        print(stock)
-
         # fetch data
         current_portfolio, profile = get_holdings_and_profile(userId, db)
         # extract objective and set default as retirement
@@ -186,17 +184,17 @@ def get_advice_by_stock(
             "\n\nPortfolio utility:\n\n" + utility_message
         )
 
-        return json.dumps({
-            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} {body.amount} in {body.symbol}",
+        return {
+            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} ${body.amount} in {body.symbol}",
             "is_recommended": is_recommended,
             "message": message,
             "is_within_sector_target": is_within_sector_target,
             "is_analyst_recommended": is_analyst_recommended,
             "is_utility_positive": is_utility_positive,
-            # "initial_adj_utility": initial_adj_utility,
-            # "final_adj_utility": final_adj_utility,
-            **stock # return stock data
-        })
+            "initial_adj_utility": initial_adj_utility,
+            "final_adj_utility": final_adj_utility,
+            **stock, # return stock data
+        }
 
     except Exception as e:
         traceback.print_exc()
@@ -278,11 +276,11 @@ def get_recommendations(
         # get adjusted utility before and after recommended transactions
         initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
 
-        return json.dumps({
+        return {
             "transactions": transactions.to_json(),
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility
-        })
+        }
 
     except Exception as e:
         # any other error

@@ -26,9 +26,9 @@ def get_stock_by_id(_id: int):
     if _id not in df.index.values:
         return None
 
-    _stock = df.iloc[_id]
+    _stock = df.loc[_id]
     return {
-        "id": _stock.index[0],
+        "id": int(_stock.index[0]), # avoid np.int64 to ensure json serialisable
         **_stock.to_dict()
     }
 
@@ -40,9 +40,9 @@ def get_stock_by_symbol(symbol: str):
         return None
     
     _id = df[df["symbol"] == symbol].index[0]
-    _stock = df.iloc[_id]
+    _stock = df.loc[_id]
     return {
-        "id": _id,
+        "id": int(_id),
         **_stock.to_dict()
     }
 

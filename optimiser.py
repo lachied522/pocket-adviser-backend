@@ -56,7 +56,8 @@ class Optimser:
             self,
             a: np.ndarray | pd.Series,
             df: pd.DataFrame,
-            additional_factors: List[np.ndarray] = []
+            additional_factors: List[np.ndarray] = [],
+            include_penalty: bool = True
         ):
         """
         Inverse utility function for optimisation.
@@ -78,9 +79,9 @@ class Optimser:
 
         # penalty is applied to discourage weights between 0 and 5% of the portfolio and deviations from current values
         # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
-        # this doesn't appear to work very well as weights close 0 and 5% are generated frequently
-        # and deviations from current values are common
-        penalty = 2 * (np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int)) + np.dot(a, a - self.a0 != 0)) / self.target
+        penalty = 0
+        if include_penalty:
+            penalty = 2 * (np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int)) + np.dot(a, a - self.a0 != 0)) / self.target
         return -(U-penalty)
     
     def apply_filters(self, df: pd.DataFrame):
@@ -293,4 +294,4 @@ class Optimser:
         wp = merge_portfolio_with_universe(self.universe, portfolio)
         # extract amount
         a = wp["units"].fillna(0) * wp["previousClose"]
-        return -self.inv_utility_function(a, self.wp, self.get_additional_factors(wp))
+        return -self.inv_utility_function(a, self.wp, self.get_additional_factors(wp), include_penalty=False)
