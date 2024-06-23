@@ -4,6 +4,8 @@ Parameters for optimisation model based user profile
 
 OBJECTIVE_MAP = {
     "RETIREMENT": {
+        "name": "long-term savings",
+        "description": "accumulate capital over the long-term",
         "target_beta": 1.25,
         "beta_quantiles": [0.25, 1.0], # quantile of beta for stocks
         "target_yield": 0.02,
@@ -23,6 +25,8 @@ OBJECTIVE_MAP = {
         }
     },
     "INCOME": {
+        "name": "passive income",
+        "description": "earn passive income",
         "target_beta": 0.75,
         "beta_quantiles": [0, 0.75],
         "target_yield": 0.05,
@@ -42,6 +46,8 @@ OBJECTIVE_MAP = {
         }
     },
     "PRESERVATION": {
+        "name": "capital preservation",
+        "description": "protect against downside risk",
         "target_beta": 0.50,
         "beta_quantiles": [0, 0.75],
         "target_yield": 0.03,
@@ -60,7 +66,9 @@ OBJECTIVE_MAP = {
             # https://www.vanguard.com.au/personal/invest-with-us/etf?portId=8201
         }
     },
-    "FIRSTHOME": {
+    "DEPOSIT": {
+        "name": "upcoming expense",
+        "description": "save for an upcoming expense",
         "target_beta": 1.1,
         "beta_quantiles": [0.25, 0.9],
         "target_yield": 0.01,
@@ -80,6 +88,8 @@ OBJECTIVE_MAP = {
         }
     },
     "CHILDREN": {
+        "name": "children",
+        "description": "provide for children in 10-20 year's time",
         "target_beta": 1.25,
         "beta_quantiles": [0.25, 0.9],
         "target_yield": 0.02,
@@ -99,6 +109,8 @@ OBJECTIVE_MAP = {
         }
     },
     "TRADING": {
+        "name": "trading",
+        "description": "profit in the short-term",
         "target_beta": 1.5,
         "beta_quantiles": [0.0, 1.0],
         "target_yield": None, # no target div yield for trading

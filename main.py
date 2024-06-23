@@ -2,8 +2,7 @@ import json
 import pandas as pd
 import numpy as np
 
-from fastapi import FastAPI, Request, WebSocket, Header, Response, Depends, HTTPException, WebSocketDisconnect, status
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -15,9 +14,9 @@ from schemas import GetRecommendationsRequest, GetAdviceByStockRequest
 from database import SessionLocal
 from cron import schedule_jobs
 
-from optimiser import Optimser
+from optimiser import Optimiser
 from params import OBJECTIVE_MAP
-from helpers import get_holdings_and_profile, get_stock_by_symbol, get_sector_allocation
+from helpers import get_holdings_and_profile, get_stock_by_symbol, get_portfolio_value, get_sector_allocation
 
 import traceback
 
@@ -42,14 +41,14 @@ def get_db():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("App running")
-    
+
     scheduler = AsyncIOScheduler()
     # add jobs to scheduler
     schedule_jobs(scheduler)
     # start scheduler
     scheduler.start()
     print("Scheduler started")
-    
+
     yield
     print("App Shutdown")
 
@@ -57,11 +56,11 @@ async def lifespan(app: FastAPI):
 def root():
     return json.dumps("Hello World")
 
-@app.post("/get-advice-by-stock/{userId}")
+@app.post("/get-advice-by-stock")
 def get_advice_by_stock(
-    userId: str,
     body: GetAdviceByStockRequest,
     response: Response,
+    userId: str|None = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -70,12 +69,14 @@ def get_advice_by_stock(
 
     The following are considered when making recommendation.
 
-    1. Target sector allocations.
-    2. Utility of portfolio before and after proposed transaction.
+    1. Overall portfolio risk (as measured by Beta)
+    2. Target sector allocations.
+    3. Income of the portfolio.
+    4. Analyst price targets.
+    5. Utility of portfolio before and after proposed transaction.
     """
     try:
         # check that symbol is valid
-        # TO DO: accomodate non-NASDAQ symbols, e.g. "BHP.AX"
         stock = get_stock_by_symbol(body.symbol)
         if not stock:
             return {
@@ -170,7 +171,7 @@ def get_advice_by_stock(
 
         # finally, check whether portfolio utility is increased by transaction
         # initialise optimiser
-        optimiser = Optimser(current_portfolio, profile)
+        optimiser = Optimiser(current_portfolio, profile)
 
         # get initial adjusted utility
         initial_adj_utility = str(optimiser.get_utility(current_portfolio))
@@ -205,6 +206,7 @@ def get_advice_by_stock(
 
         return {
             "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} ${body.amount} in {body.symbol}",
+            "user_objective": OBJECTIVE_MAP[objective]["description"],
             "is_recommended": is_recommended,
             "message": message,
             "is_recommended_by_sector_allocation": is_recommended_by_sector_allocation,
@@ -214,42 +216,57 @@ def get_advice_by_stock(
             "is_utility_positive": is_utility_positive,
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility,
-            **stock, # return stock data
+            "stockData": stock, # return stock data
         }
 
     except Exception as e:
         traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
-@app.post("/get-recommendations/{userId}")
+@app.post("/get-recommendations")
 def get_recommendations(
-    userId: str,
     body: GetRecommendationsRequest,
     response: Response,
-    db: Session = Depends(get_db)
+    userId: str|None = None,
+    db: Session = Depends(get_db),
 ):
     """
-    Provides information on whether a transaction of amount (amount) in stock (symbol) is recommended \
-    based on current portfolio and investment profile. Negative amount for sells.
-
-    The following are considered when making recommendation.
-
-    1. Target sector allocations.
-    2. Utility of portfolio before and after proposed transaction.
+    Provides a list of recommended transactions based on user's objective and preferences.
     """
     try:
-        delta_value = body.target
+        if body.action == "deposit":
+            delta_value = abs(body.target)
+        elif body.action == "withdraw":
+            delta_value = -abs(body.target)
+        else:
+            delta_value = 0
+
         current_portfolio, profile = get_holdings_and_profile(userId, db)
 
+        # edge case where implied portfolio value is zero or less
+        current_value = get_portfolio_value(current_portfolio)
+        if current_value + delta_value <= 0:
+            if body.action == "review":
+                # user is asking for a portfolio review where implied value is zero
+                # we will use an implied value of $1,000
+                delta_value = 1000
+            else:
+                # TO DO
+                return {
+                    "message": "The implied value of the user's portfolio is less than or equal to zero.",
+                    "transactions": [],
+                }
+
         # initialise optimiser
-        optimiser = Optimser(current_portfolio, profile, delta_value)
+        optimiser = Optimiser(current_portfolio, profile, delta_value)
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio()
 
-        # merge optimal and current portfolio into one df
+        # merge optimal and current portfolio
+        # include price, beta, and priceTarget fields from optimal portfolio
         df = pd.merge(
             current_portfolio[["stockId", "units"]],
-            optimal_portfolio[["stockId", "symbol", "units", "name", "previousClose"]],
+            optimal_portfolio[["stockId", "symbol", "units", "name", "previousClose", "beta", "priceTarget"]],
             how="outer",
             on="stockId",
             suffixes=("_current", "_optimal")
@@ -259,46 +276,48 @@ def get_recommendations(
         df.replace([np.inf, -np.inf], 0, inplace=True)
 
         # calculate units column
-        df["delta_units"] = df['units_optimal'] - df['units_current']
+        df["delta_units"] = df["units_optimal"] - df["units_current"]
+        # calculate value column
+        df["delta_value"] = df["delta_units"] * df["previousClose"]
 
-        # drop any rows where units is zero
-        df = df.drop(df[df['delta_units']==0].index)
+        # drop any rows where value is zero
+        df = df.drop(df[df["delta_value"]==0].index)
 
-        # sort by absolute difference
-        df = df.sort_values('delta_units', key=np.abs, ascending=False)
+        # sort by absolute difference in value
+        df = df.sort_values("delta_value", key=np.abs, ascending=False)
 
-        # loop through transactions until either delta is met or n > N
-        n = 3 # TO DO
-        value = 0
-        transactions = pd.DataFrame(columns=df.columns.to_list()) # create new df for transactions
-        for index, row in df.iterrows():
-            if abs(value) > abs(delta_value) or (n > 0 and len(transactions) >= n):
-                break
+        n = 5 # TO DO
+        if n > 0:
+            # get first n transactions
+            df = df[np.sign(df["delta_units"]) == np.sign(delta_value)].head(n)
+            # scale n transactions up (or down) such that the total is equal to delta_value
+            scaling_factor = abs(delta_value) / abs(df["delta_value"].sum())
+            # recalculate units column and round to nearest int
+            df["delta_units"] = (scaling_factor * df["delta_units"]).astype(int)
+            # update units of optimal portfolio
+            for _, row in df.iterrows():
+                index = optimal_portfolio[optimal_portfolio["stockId"] == row["stockId"]].index[0]
+                optimal_portfolio.loc[index, "units"] = row["units_current"] + row["delta_units"]
+            # drop rows from optimal portfolio not in current_portfolio or df
+            keep = pd.concat([current_portfolio["stockId"], df["stockId"]]).unique()
+            optimal_portfolio = optimal_portfolio[optimal_portfolio["stockId"].isin(keep)]
 
-            if np.sign(row['delta_units']) != np.sign(delta_value):
-                # skip transactions if sign does not match
-                continue
-
-            # if sign of transaction matches target, add to recommended transactions
-            v = row['delta_units'] * row['previousClose']
-            # check if transaction will reach target
-            if abs(value + v) <= abs(delta_value):
-                transactions.loc[index,:] = row
-                value += v
-
-            else:
-                # add partial transaction
-                partial_row = row.copy()
-                # round units up / down to nearest integer
-                partial_row['units'] = np.copysign(np.ceil((np.abs(delta_value - value)) / row['previousClose']), v)
-                transactions.loc[index,:] = partial_row
-                break
+        # rename columns
+        df = df.rename(columns={"delta_units": "units", "previousClose": "price"})
+        # extract required columns
+        transactions = df[["stockId", "symbol", "name", "units", "price", "beta", "priceTarget"]]
 
         # get adjusted utility before and after recommended transactions
+        # TO DO: calculate actual final utility
         initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
+        message = (
+            "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[profile.objective if profile else "RETIREMENT"]["description"]) +
+            "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
+        )
 
         return {
-            "transactions": transactions.to_json(),
+            "message": message,
+            "transactions": [row.to_dict() for _, row in transactions.iterrows()],
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility
         }

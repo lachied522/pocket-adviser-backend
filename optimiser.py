@@ -8,9 +8,9 @@ from params import OBJECTIVE_MAP
 from helpers import get_universe, get_riskfree_rate, merge_portfolio_with_universe
 from schemas import Profile
 
-class Optimser:
+class Optimiser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
-    profile: Profile | None
+    profile: Profile|None
     objective: str
     universe: pd.DataFrame # stock data for all available stocks in universe
     wp: pd.DataFrame # combined universe and portfolio were units is zero for stocks not held
@@ -24,8 +24,8 @@ class Optimser:
 
     def __init__(
         self,
-        portfolio: list | pd.DataFrame,
-        profile: Profile | None,
+        portfolio: list|pd.DataFrame,
+        profile: Profile|None,
         delta_value: float = 0, # target change in portfolio value
         error: float = 0.03,
         bias: float = 0.05,
@@ -67,8 +67,8 @@ class Optimser:
             case 'treynor':
                 # Treynor ratio = (r_p - r_f) / Beta_p
                 # see https://www.investopedia.com/terms/t/treynorratio.asp
-                r_p = np.dot(a, df["expReturn"] + np.array(additional_factors).sum(axis=0))
-                Beta_p = np.dot(a, df["beta"])
+                r_p = np.dot(a, df["expReturn"].fillna(0) + np.array(additional_factors).sum(axis=0))
+                Beta_p = np.dot(a, df["beta"].fillna(1))
                 # prevent divide by zero by adding small amount to beta
                 U = (r_p - r_f) / (Beta_p if Beta_p != 0 else 0.01)
 
@@ -89,50 +89,48 @@ class Optimser:
         Filters working portfolio based on investment style.
         """
         # handle edge cases
-        if self.profile.passive == 1:
-            # portfolio is all ETFs, direct equities can be removed.
-            return df.drop(df[df['isEtf']==True].index)
+        if self.profile:
+            if self.profile.passive == 1:
+                # portfolio is all ETFs, direct equities can be removed.
+                return df.drop(df[df['isEtf']==True].index)
 
-        # extract beta thresholds from profile
-        beta_thresholds = OBJECTIVE_MAP[self.objective]["beta_quantiles"]
-        match self.objective:
-            # filter working portfolio based on objective
-            # case 'RETIREMENT':
-            #     # calculate growth rates
-            #     wp['growth'] = wp.apply(lambda x: (x['forward_EPS'] / x['trailing_EPS']) - 1 if x['forward_EPS'] and x['trailing_EPS'] else None, axis=1)
-            #     # calculate PEG ratios
-            #     wp['PEG'] = wp.apply(lambda x: x['PE'] / x['growth'] if x['PE'] and x['growth'] else None, axis=1)
+        # initial_size = len(df)
 
-            #     for sector in wp['sector'].unique():
-            #         # filter stocks on per sector basis to preserve sector allocation
-            #         if sector is not None:
-            #             sector_mask = wp["sector"]==sector
-            #             # cut stocks that are in bottom 50% of PEG
-            #             lower_PEG = wp[sector_mask]['PEG'].median()
-            #             PEG_filter = wp['PEG'] < lower_PEG
-            #             # cut stocks that are outside quantiles for beta
-            #             lower_beta = wp[sector_mask]['beta'].quantile(beta_thresholds[0])
-            #             upper_beta = wp[sector_mask]['beta'].quantile(beta_thresholds[1])
-            #             beta_filter = (wp[sector_mask]['beta'] < lower_beta) | (wp[sector_mask]['beta'] > upper_beta)
-                        
-            #             combined_filter = sector_mask & (PEG_filter | beta_filter)
+        # calculate PEG ratios
+        def getPeg(row):
+            if row["pe"] and row["epsGrowth"]:
+                if row["epsGrowth"] > 0:
+                    return row["pe"] / row["epsGrowth"]
+            # return a large number
+            return 1000
+        df["PEG"] = df.apply(getPeg, axis=1)
 
-            #             wp = wp.drop(wp[combined_filter & ~wp['locked']].index)
+        # filter stocks on per sector basis to preserve sector allocation
+        for sector in df["sector"].unique():
+            sector_mask = df["sector"]==sector
+            # drop stocks that are below bottom 50% for expected return
+            lower_exp_return = df[sector_mask]["expReturn"].median()
+            # drop stocks are in top 50% for PEG
+            upper_peg = df[sector_mask]["PEG"].median()
+            # drop stocks that are outside quantiles for beta
+            lower_beta = df[sector_mask]["beta"].quantile(OBJECTIVE_MAP[self.objective]["beta_quantiles"][0])
+            upper_beta = df[sector_mask]["beta"].quantile(OBJECTIVE_MAP[self.objective]["beta_quantiles"][1])
 
-            case _:
-                # filter stocks on per sector basis to preserve sector allocation
-                for sector in df["sector"].unique():
-                    if sector is not None:
-                        sector_mask = df["sector"]==sector
-                        # cut stocks that are outside quantiles for beta
-                        lower_beta = df[sector_mask]["beta"].quantile(beta_thresholds[0])
-                        upper_beta = df[sector_mask]["beta"].quantile(beta_thresholds[1])
-                        beta_filter = (df[sector_mask]["beta"] < lower_beta) | (df[sector_mask]["beta"] > upper_beta)
-                        
-                        df = df.drop(df[beta_filter].index)
+            df = df[
+                (df["units"] > 0) | # keep stocks that are already in the portfolio
+                (df["sector"] != sector) |
+                (
+                    (df["expReturn"] > lower_exp_return) &
+                    # (df["PEG"] < upper_peg ) &
+                    ((df["beta"] > lower_beta) & (df["beta"] < upper_beta))
+                )
+            ]
 
+        # print(f"Dropped {initial_size - len(df)} rows from df")
+        # must updated a0 to be same shape as new df
+        self.a0 = df["units"] * df["previousClose"]
         return df
-    
+
     def get_sector_allocation(self):
         """
         Returns target sector allocation for optimisation based on objective and preferences if any.
@@ -143,20 +141,21 @@ class Optimser:
             # occurs when objective is TRADING
             return None
 
-        if self.profile.preferences is not None:
-            for key, value in self.profile.preferences.items():
-                if key in targets:
-                    if value == "like":
-                        # bias up sector
-                        targets[key] += 0.05
-                    else:
-                        # bias down sector
-                        targets[key] = max(targets[key] - 0.05, 0)
+        if self.profile:
+            if self.profile.preferences is not None:
+                for key, value in self.profile.preferences.items():
+                    if key in targets:
+                        if value == "like":
+                            # bias up sector
+                            targets[key] += 0.05
+                        else:
+                            # bias down sector
+                            targets[key] = max(targets[key] - 0.05, 0)
 
             # ensure sector weights sum to 1
             s = sum(targets.values())
             targets = {k: v / s for k, v in targets.items()}
-        
+
         return targets
 
     def get_constraints(self, df: pd.DataFrame):
@@ -176,10 +175,10 @@ class Optimser:
 
         # passive constraint
         passive_cons = []
-        target_passive = self.profile.passive
-        if 0 < target_passive and target_passive < 1:
-            passive = np.array(df['isEtf']==True).astype(int)
-            passive_cons = [LinearConstraint(passive, self.target*max(0, passive-self.error), self.target*min(1, passive+self.error))]
+        # target_passive = self.profile.passive if self.profile else 0.3
+        # if 0 < target_passive and target_passive < 1:
+        #     passive = np.array(df['isEtf']==True).astype(int)
+        #     passive_cons = [LinearConstraint(passive, self.target*max(0, passive-self.error), self.target*min(1, passive+self.error))]
 
         # domestic constraint
         domestic_cons = [] # TO DO
@@ -237,25 +236,22 @@ class Optimser:
         # additional_factors.append(self.bias * np.array(df['tags'].apply(lambda x: 'Featured' in x)))
 
         # user preferences
-        if self.profile.preferences is not None:
-            for sector, preference in self.profile.preferences.items():
-                factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
+        if self.profile is not None:
+            if self.profile.preferences is not None:
+                for sector, preference in self.profile.preferences.items():
+                    factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
 
-                if preference=="dislike":
-                    # reverse direction of bias
-                    factor *= -1
+                    if preference=="dislike":
+                        # reverse direction of bias
+                        factor *= -1
 
-                additional_factors.append(factor)
+                    additional_factors.append(factor)
 
         return additional_factors
 
-    def apply_filers(self, df: pd.DataFrame):
-        # TO DO
-        return df
-
     def get_optimal_portfolio(self):
         # apply filters
-        df = self.apply_filers(self.wp.copy())
+        df = self.apply_filters(self.wp.copy())
 
         # get constraints
         cons = self.get_constraints(df)
@@ -284,7 +280,7 @@ class Optimser:
         # drop zero unit rows and return
         self.optimal_portfolio = df.drop(df[df['units'] < 1].index)
         return self.optimal_portfolio
-    
+
     def get_utility(self, portfolio: pd.DataFrame):
         """
         Helper function for obtaining the adjusted utility of a portfolio.
@@ -293,4 +289,4 @@ class Optimser:
         wp = merge_portfolio_with_universe(self.universe, portfolio)
         # extract amount
         a = wp["units"].fillna(0) * wp["previousClose"]
-        return -self.inv_utility_function(a, self.wp, self.get_additional_factors(wp), include_penalty=False)
+        return -self.inv_utility_function(a, wp, self.get_additional_factors(wp), include_penalty=False)

@@ -61,3 +61,4 @@ class GetAdviceByStockRequest(BaseModel):
 
 class GetRecommendationsRequest(BaseModel):
     target: float # target amount to withdraw (negative) or deposit (positive)
+    action: str # deposit, withdraw, or review
