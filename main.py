@@ -1,6 +1,8 @@
+import os
 import json
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,8 @@ from params import OBJECTIVE_MAP
 from helpers import get_holdings_and_profile, get_stock_by_symbol, get_portfolio_value, get_sector_allocation
 
 import traceback
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -42,12 +46,13 @@ def get_db():
 async def lifespan(app: FastAPI):
     print("App running")
 
-    scheduler = AsyncIOScheduler()
-    # add jobs to scheduler
-    schedule_jobs(scheduler)
-    # start scheduler
-    scheduler.start()
-    print("Scheduler started")
+    if os.getenv("environment") == "PRODUCTION":
+        scheduler = AsyncIOScheduler()
+        # add jobs to scheduler
+        schedule_jobs(scheduler)
+        # start scheduler
+        scheduler.start()
+        print("Scheduler started")
 
     yield
     print("App Shutdown")
@@ -242,9 +247,9 @@ def get_recommendations(
             delta_value = 0
 
         current_portfolio, profile = get_holdings_and_profile(userId, db)
-
-        # edge case where implied portfolio value is zero or less
+        # get current portfolio value
         current_value = get_portfolio_value(current_portfolio)
+        # handle edge case where implied portfolio value is zero or less
         if current_value + delta_value <= 0:
             if body.action == "review":
                 # user is asking for a portfolio review where implied value is zero
@@ -258,7 +263,7 @@ def get_recommendations(
                 }
 
         # initialise optimiser
-        optimiser = Optimiser(current_portfolio, profile, delta_value)
+        optimiser = Optimiser(current_portfolio, profile, current_value+delta_value)
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio()
 

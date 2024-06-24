@@ -28,7 +28,7 @@ OBJECTIVE_MAP = {
         "name": "passive income",
         "description": "earn passive income",
         "target_beta": 0.75,
-        "beta_quantiles": [0, 0.75],
+        "beta_quantiles": [0.10, 0.75],
         "target_yield": 0.05,
         "sector_allocations": {
             "Basic Materials": 0.0754,

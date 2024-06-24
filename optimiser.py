@@ -1,51 +1,49 @@
 from typing import List, Dict
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
 from params import OBJECTIVE_MAP
-from helpers import get_universe, get_riskfree_rate, merge_portfolio_with_universe
+from helpers import get_portfolio_value, get_riskfree_rate, merge_portfolio_with_universe
 from schemas import Profile
+
+DEFAULT_PROFILE = Profile(
+    userId="",
+    objective="RETIREMENT",
+    international=30,
+    passive=30,
+    preferences={},
+)
 
 class Optimiser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
-    profile: Profile|None
+    profile: Profile
     objective: str
-    universe: pd.DataFrame # stock data for all available stocks in universe
-    wp: pd.DataFrame # combined universe and portfolio were units is zero for stocks not held
     target: float # target portfolio value
-    delta_value: float = 0 # target change in portfolio value
+    size: int = 50 # target size of portfolio
     error: float = 0.03 # margin for error when using target weights or amounts
     bias: float = 0.05 # bias placed on stocks based on preferences
     threshold: float = 0.05 # minimum weight for stock to be included in optimal portfolio
-    a0: pd.Series
     formula: str = 'treynor' # formula used for utility function
 
     def __init__(
         self,
         portfolio: list|pd.DataFrame,
         profile: Profile|None,
-        delta_value: float = 0, # target change in portfolio value
+        target: float|None = 0,
+        size: int = 50,
         error: float = 0.03,
         bias: float = 0.05,
         threshold: float = 0.05,
         formula: str = 'treynor'
     ):
         self.portfolio = portfolio if type(portfolio) == pd.DataFrame else pd.DataFrame.from_records(portfolio)
-        self.objective = profile.objective if profile else "RETIREMENT"
-        self.profile = profile
-        # get universe
-        self.universe = get_universe()
-        # merge portfolio and universe to get working portfolio
-        wp = merge_portfolio_with_universe(self.universe, portfolio)
-        self.wp = wp
-        # define inital portfolio
-        self.a0 = wp['units'] * wp['previousClose']
-        # set target value for portfolio as current portfolio value plus delta
-        self.delta_value = delta_value
-        self.target = (wp['units'] * wp['previousClose']).sum() + delta_value
+        self.profile = profile if profile else DEFAULT_PROFILE
+        # set target value
+        self.target = target if target else get_portfolio_value(portfolio)
 
+        self.size = size
         self.error = error
         self.bias = bias
         self.threshold = threshold
@@ -54,9 +52,10 @@ class Optimiser:
 
     def inv_utility_function(
             self,
-            a: np.ndarray | pd.Series,
+            a: np.ndarray|pd.Series,
             df: pd.DataFrame,
             additional_factors: List[np.ndarray] = [],
+            a0: np.ndarray|pd.Series|None = None,
             include_penalty: bool = True
         ):
         """
@@ -77,11 +76,14 @@ class Optimiser:
                 # requires stock volatilities
                 raise NotImplementedError()
 
-        # penalty is applied to discourage weights between 0 and 5% of the portfolio and deviations from current values
-        # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
         penalty = 0
         if include_penalty:
-            penalty = 2 * (np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int)) + np.dot(a, a - self.a0 != 0)) / self.target
+            # discourage weights between 0 and 5% of the portfolio
+            penalty = np.dot(a, np.logical_and(0 < a, a < self.target * self.threshold).astype(int))
+            if a0 is not None:
+                penalty = np.dot(a, a - a0 != 0)
+            # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
+            penalty = 2 * penalty / self.target
         return -(U-penalty)
     
     def apply_filters(self, df: pd.DataFrame):
@@ -89,44 +91,59 @@ class Optimiser:
         Filters working portfolio based on investment style.
         """
         # handle edge cases
-        if self.profile:
-            if self.profile.passive == 1:
-                # portfolio is all ETFs, direct equities can be removed.
-                return df.drop(df[df['isEtf']==True].index)
+        if self.profile.passive == 1:
+            # portfolio is all ETFs, direct equities can be removed.
+            return df.drop(df[df['isEtf']==True].index)
 
-        # initial_size = len(df)
+        initial_size = len(df)
 
         # calculate PEG ratios
-        def getPeg(row):
-            if row["pe"] and row["epsGrowth"]:
-                if row["epsGrowth"] > 0:
-                    return row["pe"] / row["epsGrowth"]
-            # return a large number
-            return 1000
-        df["PEG"] = df.apply(getPeg, axis=1)
+        # def getPeg(row):
+        #     if row["pe"] and row["epsGrowth"]:
+        #         if row["epsGrowth"] > 0:
+        #             return row["pe"] / row["epsGrowth"]
+        #     # return a large number
+        #     return 1000
+        # df["PEG"] = df.apply(getPeg, axis=1)
 
-        # filter stocks on per sector basis to preserve sector allocation
-        for sector in df["sector"].unique():
-            sector_mask = df["sector"]==sector
-            # drop stocks that are below bottom 50% for expected return
-            lower_exp_return = df[sector_mask]["expReturn"].median()
-            # drop stocks are in top 50% for PEG
-            upper_peg = df[sector_mask]["PEG"].median()
-            # drop stocks that are outside quantiles for beta
-            lower_beta = df[sector_mask]["beta"].quantile(OBJECTIVE_MAP[self.objective]["beta_quantiles"][0])
-            upper_beta = df[sector_mask]["beta"].quantile(OBJECTIVE_MAP[self.objective]["beta_quantiles"][1])
+        # drop stocks until size of df is 50
+        to_keep = np.array([])
+        for isEtf, _ in df.groupby("isEtf"):
+            if isEtf:
+                # TO DO
+                pass
+            else:
+                for sector, group in df.groupby("sector"):
+                    if sector not in OBJECTIVE_MAP[self.profile.objective]["sector_allocations"]:
+                        continue
 
-            df = df[
-                (df["units"] > 0) | # keep stocks that are already in the portfolio
-                (df["sector"] != sector) |
-                (
-                    (df["expReturn"] > lower_exp_return) &
-                    # (df["PEG"] < upper_peg ) &
-                    ((df["beta"] > lower_beta) & (df["beta"] < upper_beta))
-                )
-            ]
+                    # get target number of stocks for this sector based on target sector allocation
+                    num = np.ceil(self.size * OBJECTIVE_MAP[self.profile.objective]["sector_allocations"][sector])
+                    q = 0 # increase this until target size is met
+                    sub = group.copy()
+                    while len(sub) > num and q < 1:
+                        # drop stocks that are outside quantiles for beta
+                        lower_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][0])
+                        upper_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][1])
+                        # get quantile for expected return
+                        lower_exp_return = group["expReturn"].quantile(q)                # drop stocks are in top 50% for PEG
+                        # upper_peg = group["PEG"].median()
 
-        # print(f"Dropped {initial_size - len(df)} rows from df")
+                        sub = group[
+                            (group["units"] > 0) | # keep stocks that are already in the portfolio
+                            (
+                                (group["expReturn"] > lower_exp_return) &
+                                # (df["PEG"] < upper_peg ) &
+                                ((group["beta"] > lower_beta) & (group["beta"] < upper_beta))
+                            )
+                        ]
+                        q += 0.1
+
+                    to_keep = np.concatenate((to_keep, sub.index.values))
+
+        df = df.loc[to_keep]
+
+        print(f"Dropped {initial_size - len(df)} rows from df")
         # must updated a0 to be same shape as new df
         self.a0 = df["units"] * df["previousClose"]
         return df
@@ -135,22 +152,21 @@ class Optimiser:
         """
         Returns target sector allocation for optimisation based on objective and preferences if any.
         """
-        targets = OBJECTIVE_MAP[self.objective]["sector_allocations"]
+        targets = OBJECTIVE_MAP[self.profile.objective]["sector_allocations"]
 
         if targets is None:
             # occurs when objective is TRADING
             return None
 
-        if self.profile:
-            if self.profile.preferences is not None:
-                for key, value in self.profile.preferences.items():
-                    if key in targets:
-                        if value == "like":
-                            # bias up sector
-                            targets[key] += 0.05
-                        else:
-                            # bias down sector
-                            targets[key] = max(targets[key] - 0.05, 0)
+        if self.profile.preferences is not None:
+            for key, value in self.profile.preferences.items():
+                if key in targets:
+                    if value == "like":
+                        # bias up sector
+                        targets[key] += 0.05
+                    else:
+                        # bias down sector
+                        targets[key] = max(targets[key] - 0.05, 0)
 
             # ensure sector weights sum to 1
             s = sum(targets.values())
@@ -168,7 +184,7 @@ class Optimiser:
 
         # yield constraint
         yield_cons = []
-        target_yield = OBJECTIVE_MAP[self.objective]["target_yield"]
+        target_yield = OBJECTIVE_MAP[self.profile.objective]["target_yield"]
         if target_yield is not None:
             div_yield = df['dividendYield'].fillna(0)
             yield_cons = [LinearConstraint(div_yield, self.target*max(0, target_yield-0.01), self.target*(target_yield+0.01))] # error for dividends is 1%
@@ -236,22 +252,24 @@ class Optimiser:
         # additional_factors.append(self.bias * np.array(df['tags'].apply(lambda x: 'Featured' in x)))
 
         # user preferences
-        if self.profile is not None:
-            if self.profile.preferences is not None:
-                for sector, preference in self.profile.preferences.items():
-                    factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
+        if self.profile.preferences is not None:
+            for sector, preference in self.profile.preferences.items():
+                factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
 
-                    if preference=="dislike":
-                        # reverse direction of bias
-                        factor *= -1
+                if preference=="dislike":
+                    # reverse direction of bias
+                    factor *= -1
 
-                    additional_factors.append(factor)
+                additional_factors.append(factor)
 
         return additional_factors
 
     def get_optimal_portfolio(self):
+        # get a working copy of the portfolio
+        df = merge_portfolio_with_universe(self.portfolio)
+
         # apply filters
-        df = self.apply_filters(self.wp.copy())
+        df = self.apply_filters(df)
 
         # get constraints
         cons = self.get_constraints(df)
@@ -267,11 +285,14 @@ class Optimiser:
         # set keep_feasible True to ensure iterations remain within bounds
         bnds = Bounds(lb, ub, keep_feasible=True)
 
+        # define inital amounts for penalty calculation
+        a0 = df['units'].fillna(0) * df['previousClose']
+
         # first guess for minimiser is equal weight
         equal_weight = self.target * np.ones(len(df)) / len(df)
 
         # SLSQP appears to perform the best
-        a = minimize(self.inv_utility_function, equal_weight, args=(df, additional_factors),
+        a = minimize(self.inv_utility_function, equal_weight, args=(df, additional_factors, a0),
                     method='SLSQP', bounds=bnds, constraints=cons,
                     options={'maxiter': 100}).x
 
@@ -285,8 +306,7 @@ class Optimiser:
         """
         Helper function for obtaining the adjusted utility of a portfolio.
         """
-        # merge portfolio and universe to get working portfolio
-        wp = merge_portfolio_with_universe(self.universe, portfolio)
+        df = merge_portfolio_with_universe(portfolio)
         # extract amount
-        a = wp["units"].fillna(0) * wp["previousClose"]
-        return -self.inv_utility_function(a, wp, self.get_additional_factors(wp), include_penalty=False)
+        a = df["units"].fillna(0) * df["previousClose"]
+        return -self.inv_utility_function(a, df, self.get_additional_factors(df), include_penalty=False)
