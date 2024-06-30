@@ -27,6 +27,10 @@ class StockDataClient:
                     raise Exception(f"Error making API request, status: {response.status}")
                 return await response.json()
 
+    async def get_all_stocks_by_exchange(self, exchange: str = 'NASDAQ') -> List[dict]:
+        data = await self.make_authenticated_api_request(f"symbol/{exchange}")
+        return data
+
     async def get_quote(self, symbol: str) -> Optional[dict]:
         data = await self.make_authenticated_api_request(f"quote/{symbol}")
         if not data:
@@ -45,10 +49,6 @@ class StockDataClient:
         if not data:
             return None
         return data[0]
-
-    async def get_all_stocks_by_exchange(self, exchange: str = 'NASDAQ') -> List[dict]:
-        data = await self.make_authenticated_api_request(f"symbol/{exchange}")
-        return data
 
     async def get_growth_rates(self, symbol: str, period: str = "annual", limit: int = 1) -> Optional[dict]:
         params = {'period': period, 'limit': str(limit)}
@@ -73,9 +73,23 @@ class StockDataClient:
         data = await self.make_authenticated_api_request("stock_news", params)
         return data
 
-    async def get_analyst_research(self, symbol: str) -> Optional[dict]:
-        params = {'symbol': symbol}
+    async def get_analyst_research(self, symbol: str, limit: int = 10) -> Optional[dict]:
+        params = {
+            'symbol': symbol
+        }
         data = await self.make_authenticated_api_request("price-target", params, 4)
         if not data:
             return None
-        return data[0]
+        return data
+
+    async def get_historical_price(self, symbol: str, _from: str|None = None, _to: str|None = None) -> Optional[dict]:
+        params = {}
+
+        if _from is not None and _to is not None:
+            params["from"] = _from
+            params["to"] = _to
+
+        data = await self.make_authenticated_api_request(f"historical-price-full/{symbol}", params)
+        if not data:
+            return None
+        return data

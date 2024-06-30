@@ -1,8 +1,10 @@
 import os
 import json
-import pandas as pd
-import numpy as np
+
 from dotenv import load_dotenv
+
+import numpy as np
+import pandas as pd
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +17,11 @@ from sqlalchemy.orm import Session
 from schemas import GetRecommendationsRequest, GetAdviceByStockRequest
 from database import SessionLocal
 from cron import schedule_jobs
-
-from optimiser import Optimiser
 from params import OBJECTIVE_MAP
-from helpers import get_holdings_and_profile, get_stock_by_symbol, get_portfolio_value, get_sector_allocation
+from optimiser import Optimiser
+from universe import Universe
+from crud import insert_advice_record
+from helpers import get_user_data, get_portfolio_value, get_sector_allocation
 
 import traceback
 
@@ -82,7 +85,7 @@ def get_advice_by_stock(
     """
     try:
         # check that symbol is valid
-        stock = get_stock_by_symbol(body.symbol)
+        stock = Universe().get_stock_by_symbol(body.symbol)
         if not stock:
             return {
                 "message": f"Symbol {body.symbol} was not found",
@@ -90,7 +93,7 @@ def get_advice_by_stock(
             }
 
         # fetch data
-        current_portfolio, profile = get_holdings_and_profile(userId, db)
+        current_portfolio, profile, _ = get_user_data(userId, db)
         # extract objective and set default as retirement
         objective = profile.objective if profile else "RETIREMENT"
         # get proposed number of units by dividing by previousClose
@@ -228,8 +231,8 @@ def get_advice_by_stock(
         traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
-@app.post("/get-recommendations")
-def get_recommendations(
+@app.post("/get-advice")
+def get_advice(
     body: GetRecommendationsRequest,
     response: Response,
     userId: str|None = None,
@@ -240,32 +243,35 @@ def get_recommendations(
     """
     try:
         if body.action == "deposit":
-            delta_value = abs(body.target)
+            amount = abs(body.amount)
         elif body.action == "withdraw":
-            delta_value = -abs(body.target)
+            amount = -abs(body.amount)
         else:
-            delta_value = 0
+            amount = 0
 
-        current_portfolio, profile = get_holdings_and_profile(userId, db)
+        current_portfolio, profile, prev_advice = get_user_data(userId, db)
         # get current portfolio value
         current_value = get_portfolio_value(current_portfolio)
         # handle edge case where implied portfolio value is zero or less
-        if current_value + delta_value <= 0:
+        if current_value + amount <= 0:
             if body.action == "review":
                 # user is asking for a portfolio review where implied value is zero
                 # we will use an implied value of $1,000
-                delta_value = 1000
+                amount = 1000
             else:
                 # TO DO
+                response.status_code = 400
                 return {
                     "message": "The implied value of the user's portfolio is less than or equal to zero.",
                     "transactions": [],
                 }
 
         # initialise optimiser
-        optimiser = Optimiser(current_portfolio, profile, current_value+delta_value)
+        optimiser = Optimiser(current_portfolio, profile, current_value + amount)
+        # get stocks to exclude from advice
+        exclude = [transaction["symbol"] for record in prev_advice for transaction in record.transactions]
         # get optimal portfolio
-        optimal_portfolio = optimiser.get_optimal_portfolio()
+        optimal_portfolio = optimiser.get_optimal_portfolio(exclude=exclude)
 
         # merge optimal and current portfolio
         # include price, beta, and priceTarget fields from optimal portfolio
@@ -294,9 +300,9 @@ def get_recommendations(
         n = 5 # TO DO
         if n > 0:
             # get first n transactions
-            df = df[np.sign(df["delta_units"]) == np.sign(delta_value)].head(n)
+            df = df[np.sign(df["delta_units"]) == np.sign(amount)].head(n)
             # scale n transactions up (or down) such that the total is equal to delta_value
-            scaling_factor = abs(delta_value) / abs(df["delta_value"].sum())
+            scaling_factor = abs(amount) / abs(df["delta_value"].sum())
             # recalculate units column and round to nearest int
             df["delta_units"] = (scaling_factor * df["delta_units"]).astype(int)
             # update units of optimal portfolio
@@ -313,16 +319,27 @@ def get_recommendations(
         transactions = df[["stockId", "symbol", "name", "units", "price", "beta", "priceTarget"]]
 
         # get adjusted utility before and after recommended transactions
-        # TO DO: calculate actual final utility
         initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
         message = (
             "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[profile.objective if profile else "RETIREMENT"]["description"]) +
             "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
         )
 
+        transactions = transactions.to_dict(orient='records')
+        # insert advice record
+        if userId is not None:
+            insert_advice_record({
+                "userId": userId,
+                "action": body.action.upper(),
+                "amount": body.amount,
+                "transactions": transactions,
+            }, db)
+
+            db.commit()
+
         return {
             "message": message,
-            "transactions": [row.to_dict() for _, row in transactions.iterrows()],
+            "transactions": transactions,
             "initial_adj_utility": initial_adj_utility,
             "final_adj_utility": final_adj_utility
         }

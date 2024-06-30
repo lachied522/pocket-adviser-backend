@@ -43,10 +43,22 @@ class Profile(BaseModel):
     class Config:
         from_attributes = True
 
+class Advice(BaseModel):
+    id: int
+    userId: str
+    action: str
+    amount: float
+    transactions: List[dict]
+    createdAt: str
+
+    class Config:
+        from_attributes = True
+
 class User(BaseModel):
     id: str
 
     holdings: List[Holding]
+    advice: List[Advice]
     profile: Optional[Profile]
 
     class Config:
@@ -60,5 +72,5 @@ class GetAdviceByStockRequest(BaseModel):
     amount: float
 
 class GetRecommendationsRequest(BaseModel):
-    target: float # target amount to withdraw (negative) or deposit (positive)
+    amount: float # target amount to withdraw (negative) or deposit (positive)
     action: str # deposit, withdraw, or review

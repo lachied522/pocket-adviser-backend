@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, ARRAY, ForeignKey
 from sqlalchemy.orm import backref, relationship
-from sqlalchemy.types import JSON
+from sqlalchemy.types import JSON, DateTime
 
 from database import Base
 
@@ -10,6 +10,7 @@ class User(Base):
 
     profile = relationship('Profile', backref=backref('user'), lazy='joined')
     holdings = relationship('Holding', backref=backref('user'), lazy='joined')
+    advice = relationship('Advice', backref=backref('user'), lazy='joined')
 
 class Profile(Base):
     __tablename__ = 'Profile'
@@ -18,6 +19,15 @@ class Profile(Base):
     passive = Column(Float, nullable=True)
     international = Column(Float, nullable=True)
     preferences = Column(JSON)
+
+class Advice(Base):
+    __tablename__ = 'Advice'
+    id = Column(Integer, primary_key=True)
+    action = Column(String)
+    amount = Column(Float)
+    transactions = Column(ARRAY(JSON))
+    createdAt = Column(DateTime)
+    userId = Column(String, ForeignKey('User.id'))
 
 class Stock(Base):
     __tablename__ = 'Stock'

@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import Any, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -86,16 +86,41 @@ class Optimiser:
             penalty = 2 * penalty / self.target
         return -(U-penalty)
     
-    def apply_filters(self, df: pd.DataFrame):
+    def optimise(
+        self,
+        df: pd.DataFrame,
+        additional_factors: list = [],
+        a0: np.ndarray|list = [],
+        cons: Tuple[list] = tuple(),
+        include_penalty: bool = True,
+        method: str = "SLSQP",
+        maxiter: int = 100
+    ):
+        # define boundaries
+        # lower bound equal to zero (no shorts)
+        lb = np.zeros(len(df))
+        # upper bound equal to total value of portfolio
+        ub = self.target * np.ones(len(df))
+        # set keep_feasible True to ensure iterations remain within bounds
+        bnds = Bounds(lb, ub, keep_feasible=True)
+        # define first guess for minimiser as equal weight
+        equal_weight = self.target * np.ones(len(df)) / len(df)
+        return minimize(self.inv_utility_function, equal_weight, args=(df, additional_factors, a0, include_penalty),
+                        method=method, bounds=bnds, constraints=cons,
+                        options={'maxiter': maxiter}).x
+
+    def apply_filters(self, df: pd.DataFrame, exclude: List[str] = [], include: List[str] = []):
         """
         Filters working portfolio based on investment style.
         """
+        # drop symbols in 'exclude' array
+        df = df[~df["symbol"].isin(exclude)]
         # handle edge cases
         if self.profile.passive == 1:
             # portfolio is all ETFs, direct equities can be removed.
             return df.drop(df[df['isEtf']==True].index)
 
-        initial_size = len(df)
+        # initial_size = len(df)
 
         # calculate PEG ratios
         # def getPeg(row):
@@ -130,6 +155,7 @@ class Optimiser:
                         # upper_peg = group["PEG"].median()
 
                         sub = group[
+                            # (group["symbol"].isin(include)) # keep stocks in include array
                             (group["units"] > 0) | # keep stocks that are already in the portfolio
                             (
                                 (group["expReturn"] > lower_exp_return) &
@@ -143,7 +169,7 @@ class Optimiser:
 
         df = df.loc[to_keep]
 
-        print(f"Dropped {initial_size - len(df)} rows from df")
+        # print(f"Dropped {initial_size - len(df)} rows from df")
         # must updated a0 to be same shape as new df
         self.a0 = df["units"] * df["previousClose"]
         return df
@@ -264,12 +290,12 @@ class Optimiser:
 
         return additional_factors
 
-    def get_optimal_portfolio(self):
+    def get_optimal_portfolio(self, exclude: List[str] = [], include: List[str] = []):
         # get a working copy of the portfolio
         df = merge_portfolio_with_universe(self.portfolio)
 
         # apply filters
-        df = self.apply_filters(df)
+        df = self.apply_filters(df, exclude, include)
 
         # get constraints
         cons = self.get_constraints(df)
@@ -277,24 +303,11 @@ class Optimiser:
         # get additional factors
         additional_factors = self.get_additional_factors(df)
 
-        # define boundaries
-        # lower bound equal to zero (no shorts)
-        lb = np.zeros(len(df))
-        # upper bound equal to total value of portfolio
-        ub = self.target * np.ones(len(df))
-        # set keep_feasible True to ensure iterations remain within bounds
-        bnds = Bounds(lb, ub, keep_feasible=True)
-
         # define inital amounts for penalty calculation
         a0 = df['units'].fillna(0) * df['previousClose']
 
-        # first guess for minimiser is equal weight
-        equal_weight = self.target * np.ones(len(df)) / len(df)
-
         # SLSQP appears to perform the best
-        a = minimize(self.inv_utility_function, equal_weight, args=(df, additional_factors, a0),
-                    method='SLSQP', bounds=bnds, constraints=cons,
-                    options={'maxiter': 100}).x
+        a = self.optimise(df, additional_factors, a0, cons=cons)
 
         # update units column of optimal portfolio and return
         df['units'] = np.round(a / df['previousClose'])

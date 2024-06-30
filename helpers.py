@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
 
@@ -34,7 +36,7 @@ def get_riskfree_rate():
     """
     return 0.05 # TO DO
 
-def get_holdings_and_profile(userId: str|None, db: Session):
+def get_user_data(userId: str|None, db: Session):
     """
     Get all holdings and profile that belong to a user.
     """
@@ -46,16 +48,28 @@ def get_holdings_and_profile(userId: str|None, db: Session):
         )
 
     # could fetch through a join table by sqlalchemy throws an error
-    holdings = crud.get_holdings_by_user_id(userId, db)
-    profile = crud.get_profile_by_user_id(userId, db)
-    if (len(holdings) > 0):
-        portfolio = pd.DataFrame.from_records([m.__dict__ for m in holdings], index='id').drop('_sa_instance_state', axis=1)
+    user = crud.get_user_record(userId, db)
+    if user is None:
+        raise Exception("User not found")
+
+    if (len(user.holdings) > 0):
+        portfolio = pd.DataFrame.from_records([m.__dict__ for m in user.holdings], index='id').drop('_sa_instance_state', axis=1)
     else:
         portfolio = pd.DataFrame(columns=["stockId", "units"])
+
+    profile = None
+    if user.profile:
+        profile = user.profile[0]
+
+    advice = []
+    if (len(user.advice) > 0):
+        now = datetime.now()
+        advice = [record for record in user.advice if now - record.createdAt < timedelta(days=1)]
 
     return (
         portfolio,
         profile,
+        advice,
     )
 
 def merge_portfolio_with_universe(portfolio: pd.DataFrame):
