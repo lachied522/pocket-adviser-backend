@@ -80,7 +80,7 @@ def merge_portfolio_with_universe(portfolio: pd.DataFrame):
         merged["stockId"] = universe.index
         merged["units"] = np.zeros(len(merged))
     else:
-        merged = pd.merge(universe, portfolio[["stockId", "units"]], left_on='id', right_on='stockId', how='left')
+        merged = pd.merge(universe, portfolio[["stockId", "units"]], left_index=True, right_on='stockId', how='left').reset_index(drop=True)
         merged["units"] = merged["units"].fillna(0)
 
     return merged

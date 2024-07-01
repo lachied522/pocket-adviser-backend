@@ -21,7 +21,7 @@ class Optimiser:
     profile: Profile
     objective: str
     target: float # target portfolio value
-    size: int = 50 # target size of portfolio
+    size: int = 20 # target size of portfolio
     error: float = 0.03 # margin for error when using target weights or amounts
     bias: float = 0.05 # bias placed on stocks based on preferences
     threshold: float = 0.05 # minimum weight for stock to be included in optimal portfolio
@@ -32,7 +32,7 @@ class Optimiser:
         portfolio: list|pd.DataFrame,
         profile: Profile|None,
         target: float|None = 0,
-        size: int = 50,
+        size: int = 20,
         error: float = 0.03,
         bias: float = 0.05,
         threshold: float = 0.05,
@@ -94,13 +94,13 @@ class Optimiser:
         cons: Tuple[list] = tuple(),
         include_penalty: bool = True,
         method: str = "SLSQP",
-        maxiter: int = 100
+        maxiter: int = 200
     ):
         # define boundaries
         # lower bound equal to zero (no shorts)
         lb = np.zeros(len(df))
         # upper bound equal to total value of portfolio
-        ub = self.target * np.ones(len(df))
+        ub = self.target * np.ones(len(df)) / self.size
         # set keep_feasible True to ensure iterations remain within bounds
         bnds = Bounds(lb, ub, keep_feasible=True)
         # define first guess for minimiser as equal weight
@@ -143,7 +143,7 @@ class Optimiser:
                         continue
 
                     # get target number of stocks for this sector based on target sector allocation
-                    num = np.ceil(self.size * OBJECTIVE_MAP[self.profile.objective]["sector_allocations"][sector])
+                    num = np.ceil(50 * OBJECTIVE_MAP[self.profile.objective]["sector_allocations"][sector])
                     q = 0 # increase this until target size is met
                     sub = group.copy()
                     while len(sub) > num and q < 1:

@@ -292,31 +292,49 @@ def get_advice(
         df["delta_value"] = df["delta_units"] * df["previousClose"]
 
         # drop any rows where value is zero
-        df = df.drop(df[df["delta_value"]==0].index)
+        df.drop(df[df["delta_value"]==0].index, inplace=True)
 
         # sort by absolute difference in value
-        df = df.sort_values("delta_value", key=np.abs, ascending=False)
+        df.sort_values("delta_value", key=np.abs, ascending=False, inplace=True)
 
-        n = 5 # TO DO
-        if n > 0:
-            # get first n transactions
-            df = df[np.sign(df["delta_units"]) == np.sign(amount)].head(n)
-            # scale n transactions up (or down) such that the total is equal to delta_value
-            scaling_factor = abs(amount) / abs(df["delta_value"].sum())
-            # recalculate units column and round to nearest int
-            df["delta_units"] = (scaling_factor * df["delta_units"]).astype(int)
-            # update units of optimal portfolio
-            for _, row in df.iterrows():
+        value = 0
+        max_rows = 5
+        if body.action != "review":
+            transactions = pd.DataFrame(columns=df.columns.to_list())
+
+            for index, row in df.iterrows():
+                if np.sign(row["delta_value"]) != np.sign(amount):
+                    continue
+                # add row to transactions
+                transactions.loc[index,:] = row
+                # check if transaction must be scaled down to meet amount
+                scaling_factor = min(abs(amount - value) / abs(row["delta_value"]), 1)
+                if scaling_factor < 1:
+                    transactions.loc[index, "delta_units"] = np.floor(row["delta_units"] * scaling_factor)
+                    transactions.loc[index, "delta_value"] = row["delta_units"] * row["previousClose"]
+                    break
+                # increment value
+                value += row["delta_value"]
+            
+            # update optimal_portfolio
+            for _, row in transactions.iterrows():
                 index = optimal_portfolio[optimal_portfolio["stockId"] == row["stockId"]].index[0]
                 optimal_portfolio.loc[index, "units"] = row["units_current"] + row["delta_units"]
-            # drop rows from optimal portfolio not in current_portfolio or df
+            
+            # drop rows from optimal_portfolio not in current_portfolio or df
             keep = pd.concat([current_portfolio["stockId"], df["stockId"]]).unique()
             optimal_portfolio = optimal_portfolio[optimal_portfolio["stockId"].isin(keep)]
+        else:
+            transactions = df[df["delta_value"] > 0.05 * current_value].head(max_rows)
 
+        # drop any zero unit rows
+        transactions.drop(transactions[transactions["delta_units"] == 0].index, inplace=True)
         # rename columns
-        df = df.rename(columns={"delta_units": "units", "previousClose": "price"})
+        transactions.rename(columns={"delta_units": "units", "previousClose": "price"}, inplace=True)
         # extract required columns
-        transactions = df[["stockId", "symbol", "name", "units", "price", "beta", "priceTarget"]]
+        transactions = transactions[["stockId", "symbol", "name", "units", "price", "beta", "priceTarget"]]
+        # convert to records
+        transactions = transactions.to_dict(orient='records')
 
         # get adjusted utility before and after recommended transactions
         initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
@@ -325,7 +343,6 @@ def get_advice(
             "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
         )
 
-        transactions = transactions.to_dict(orient='records')
         # insert advice record
         if userId is not None:
             insert_advice_record({

@@ -43,7 +43,7 @@ class Universe:
         # replace NaN with None to ensure json serialisable
         _stock = df.loc[_id].replace(np.nan, None)
         return {
-            "id": int(_stock.index[0]), # avoid np.int64 to ensure json serialisable
+            "id": _id, # avoid np.int64 to ensure json serialisable
             **_stock.to_dict()
         }
 
