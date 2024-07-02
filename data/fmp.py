@@ -3,7 +3,7 @@ from typing import Optional, Union, Dict, List
 
 import aiohttp
 
-class StockDataClient:
+class ApiClient:
     API_KEY: str
     API_BASE_URL: str
 
@@ -90,6 +90,19 @@ class StockDataClient:
             params["to"] = _to
 
         data = await self.make_authenticated_api_request(f"historical-price-full/{symbol}", params)
+        if not data:
+            return None
+        return data
+
+    async def get_treasury_rates(self, _from: str, _to: str|None = None) -> Optional[dict]:
+        params = {
+            "from": _from
+        }
+
+        if _to is not None:
+            params["to"] = _to
+
+        data = await self.make_authenticated_api_request("treasury", params, 4)
         if not data:
             return None
         return data

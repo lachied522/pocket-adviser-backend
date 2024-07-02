@@ -1,5 +1,4 @@
 import os
-import json
 
 from dotenv import load_dotenv
 
@@ -49,7 +48,7 @@ def get_db():
 async def lifespan(app: FastAPI):
     print("App running")
 
-    if os.getenv("environment") == "PRODUCTION":
+    if os.getenv("ENVIRONMENT") == "production":
         scheduler = AsyncIOScheduler()
         # add jobs to scheduler
         schedule_jobs(scheduler)
@@ -59,10 +58,6 @@ async def lifespan(app: FastAPI):
 
     yield
     print("App Shutdown")
-
-@app.get("/")
-def root():
-    return json.dumps("Hello World")
 
 @app.post("/get-advice-by-stock")
 def get_advice_by_stock(

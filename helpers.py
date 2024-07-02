@@ -30,12 +30,6 @@ def get_sector_allocation(portfolio: pd.DataFrame, sector: str):
             value += row["units"] * stock["previousClose"]
     return value
 
-def get_riskfree_rate():
-    """
-    Risk free rate for use in optimisation models. Taken as 10-year US treasury yield.
-    """
-    return 0.05 # TO DO
-
 def get_user_data(userId: str|None, db: Session):
     """
     Get all holdings and profile that belong to a user.

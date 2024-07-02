@@ -1,3 +1,7 @@
+from datetime import datetime, timedelta
+
+import asyncio
+
 import numpy as np
 import pandas as pd
 
@@ -5,11 +9,12 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from crud import get_all_stocks
+from data.fmp import ApiClient
 
 class Universe:
     data: pd.DataFrame = pd.DataFrame()
-    r_f: float | None = None # risk-free rate
-    MRP: float | None = None # market risk premium
+    r_f: float|None = None # risk-free rate
+    MRP: float|None = None # market risk premium
 
     def __new__(cls):
         # check if instance already exists and return
@@ -28,12 +33,25 @@ class Universe:
         df["expReturn"] = df.apply(lambda x: x["priceTarget"] / x["previousClose"] - 1, axis=1).fillna(0)
         # update state
         self.data = df
-        
+
     def get(self):
         if self.data.empty:
             self.revalidate()
-            
+
         return self.data
+
+    def get_rf(self):
+        if self.r_f is not None:
+            return self.r_f
+        # must fetch rates synchronously and update state
+        client = ApiClient()
+        # yesterday is most up to date
+        yesterday = datetime.now() - timedelta(days=1)
+        data = asyncio.run(client.get_treasury_rates(yesterday.strftime("%Y-%m-%d")))
+        if data is None:
+            # return 5% as default
+            return 0.05
+        return data[0]["year10"]
 
     def get_stock_by_id(self, _id: int):
         df = self.get()

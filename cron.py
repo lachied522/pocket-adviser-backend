@@ -6,12 +6,13 @@ from sqlalchemy.dialects.postgresql import insert
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from data import StockDataClient
+from data.fmp import ApiClient
+from data.yahoo import get_stock_info # backup data source
 from universe import Universe
 from models import Stock
 from database import SessionLocal
 
-client = StockDataClient()
+client = ApiClient()
 
 async def get_aggregated_stock_data(symbol: str, exchange: str = 'NASDAQ', _quote: dict = None):
     # Aggregate data from required endpoints and format into a database-friendly record
@@ -39,9 +40,18 @@ async def get_aggregated_stock_data(symbol: str, exchange: str = 'NASDAQ', _quot
         # stock not found
         return None
 
-    if profile.get("isFund"):
-        # exclude funds
+    # exclude inactive stocks and etfs
+    if not profile.get("isActivelyTrading") or profile.get("isEtf") or profile.get("isFund"):
+        # exclude etfs
         return None
+
+    # price target is essential for functionality
+    # FMP does not have consensus info for ASX stocks
+    # we will use our backup data source instead
+    priceTarget = consensus.get('targetConsensus') if consensus else None
+    if priceTarget is None:
+        info = get_stock_info(symbol)
+        priceTarget = info.get('priceTarget')
 
     return {
         'symbol': symbol,
@@ -59,14 +69,14 @@ async def get_aggregated_stock_data(symbol: str, exchange: str = 'NASDAQ', _quot
         'pe': quote.get('pe'),
         'dividendAmount': profile.get('lastDiv'),
         'dividendYield': ratios.get('dividendYield') if ratios else None,
-        'epsGrowth': growth.get('growthEps') if growth else None,
-        'priceTarget': consensus.get('targetConsensus') if consensus else None,
+        'epsGrowth': growth.get('growthEPS') if growth else None,
+        'priceTarget': priceTarget,
     }
 
 async def refresh_stock_data_by_exchange(exchange: str) -> None:
     if not (exchange == "ASX" or exchange == "NASDAQ"):
         raise Exception("Exchange must be ASX or NASDAQ")
-    
+
     try:
         db = SessionLocal()
         # fetch all symbols for exchange
@@ -122,7 +132,7 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
     finally:
         # close db
         db.close()
-    
+
 def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         lambda: refresh_stock_data_by_exchange("ASX"),

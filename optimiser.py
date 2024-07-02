@@ -11,7 +11,7 @@ from schemas import Profile
 DEFAULT_PROFILE = Profile(
     userId="",
     objective="RETIREMENT",
-    international=30,
+    international=70,
     passive=30,
     preferences={},
 )
@@ -223,7 +223,11 @@ class Optimiser:
         #     passive_cons = [LinearConstraint(passive, self.target*max(0, passive-self.error), self.target*min(1, passive+self.error))]
 
         # domestic constraint
-        domestic_cons = [] # TO DO
+        international_cons = []
+        target_international = self.profile.international
+        if 0 < target_international and target_international < 1:
+            international = np.array(df["exchange"]=="NASDAQ")
+            international_cons = [LinearConstraint(international, self.target*max(0, target_international), self.target*min(target_international, 1))]
 
         # constrain weight of 'locked' holdings
         # locked_cons = []
@@ -268,7 +272,7 @@ class Optimiser:
             yield_cons +
             passive_cons +
             sector_cons +
-            domestic_cons
+            international_cons
             # locked_cons
         )
 
