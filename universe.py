@@ -29,8 +29,10 @@ class Universe:
         db.close()
         # convert to dataframe
         df = pd.DataFrame.from_records([m.__dict__ for m in data], index='id').drop('_sa_instance_state', axis=1)
+        # drop rows that are missing required fields
+        df.dropna(subset=["priceTarget", "previousClose", "beta"], inplace=True)
         # add expected return column
-        df["expReturn"] = df.apply(lambda x: x["priceTarget"] / x["previousClose"] - 1, axis=1).fillna(0)
+        df["expReturn"] = df.apply(lambda row: (row["priceTarget"] / row["previousClose"]) - 1, axis=1)
         # update state
         self.data = df
 
@@ -41,6 +43,7 @@ class Universe:
         return self.data
 
     def get_rf(self):
+        raise NotImplementedError()
         if self.r_f is not None:
             return self.r_f
         # must fetch rates synchronously and update state

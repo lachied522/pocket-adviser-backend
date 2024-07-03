@@ -22,8 +22,6 @@ from universe import Universe
 from crud import insert_advice_record
 from helpers import get_user_data, get_portfolio_value, get_sector_allocation
 
-import traceback
-
 load_dotenv()
 
 app = FastAPI()
@@ -41,7 +39,6 @@ def get_db():
     try:
         yield db
     finally:
-        print('db closing')
         db.close()
 
 @asynccontextmanager
@@ -223,7 +220,7 @@ def get_advice_by_stock(
         }
 
     except Exception as e:
-        traceback.print_exc()
+        print("Error in get_advice_by_stock route: ", e)
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
 @app.post("/get-advice")
@@ -263,8 +260,10 @@ def get_advice(
 
         # initialise optimiser
         optimiser = Optimiser(current_portfolio, profile, current_value + amount)
-        # get stocks to exclude from advice
-        exclude = [transaction["symbol"] for record in prev_advice for transaction in record.transactions]
+        # want to select a random sample of stocks from prev_advice records to exclude
+        # this will give the appearance of generating a new series of recommendations
+        prev_symbols = [transaction["symbol"] for record in prev_advice for transaction in record.transactions]
+        exclude = np.random.choice(prev_symbols, np.random.randint(1, max(len(prev_symbols), 5)), replace=False)
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio(exclude=exclude)
 
@@ -292,24 +291,40 @@ def get_advice(
         # sort by absolute difference in value
         df.sort_values("delta_value", key=np.abs, ascending=False, inplace=True)
 
-        value = 0
         max_rows = 5
-        if body.action != "review":
-            transactions = pd.DataFrame(columns=df.columns.to_list())
+        if body.action == "review":
+            transactions = df[df["delta_value"] > 0.05 * current_value].head(max_rows)
+        else:
+            temp = df[np.sign(df["delta_value"]) == np.sign(amount)].head(max_rows)
+            temp_sum = temp["delta_value"].sum()
+            if abs(temp_sum) > abs(amount) * 1.05:
+                # sum is more than 5% above amount, must scale down
+                # iterate through rows of temp until value sums to 'amount'
+                value = 0
+                transactions = pd.DataFrame(columns=df.columns.to_list())
+                for index, row in temp.iterrows():
+                    # add row to transactions
+                    transactions.loc[index,:] = row
+                    # check if transaction must be scaled down to meet amount
+                    scaling_factor = min(abs(amount - value) / abs(row["delta_value"]), 1)
+                    if scaling_factor < 1:
+                        transactions.loc[index, "delta_units"] = np.floor(row["delta_units"] * scaling_factor)
+                        transactions.loc[index, "delta_value"] = row["delta_units"] * row["previousClose"]
+                        break
+                    # increment value
+                    value += row["delta_value"]
 
-            for index, row in df.iterrows():
-                if np.sign(row["delta_value"]) != np.sign(amount):
-                    continue
-                # add row to transactions
-                transactions.loc[index,:] = row
-                # check if transaction must be scaled down to meet amount
-                scaling_factor = min(abs(amount - value) / abs(row["delta_value"]), 1)
-                if scaling_factor < 1:
-                    transactions.loc[index, "delta_units"] = np.floor(row["delta_units"] * scaling_factor)
-                    transactions.loc[index, "delta_value"] = row["delta_units"] * row["previousClose"]
-                    break
-                # increment value
-                value += row["delta_value"]
+            elif abs(temp_sum) < abs(amount) * 0.95:
+                # sum is less than 5% below amount, must scale up
+                # apply scaling factor to each transaction
+                transactions = temp
+                scaling_factor = abs(amount) / abs(temp_sum)
+                print(scaling_factor)
+                transactions["delta_units"] = np.round(transactions["delta_units"] * scaling_factor).astype(int)
+                transactions["delta_value"] = transactions["delta_value"] * scaling_factor
+            else:
+                # sum is within 5% of amount, no scaling required
+                transactions = temp
             
             # update optimal_portfolio
             for _, row in transactions.iterrows():
@@ -319,8 +334,6 @@ def get_advice(
             # drop rows from optimal_portfolio not in current_portfolio or df
             keep = pd.concat([current_portfolio["stockId"], df["stockId"]]).unique()
             optimal_portfolio = optimal_portfolio[optimal_portfolio["stockId"].isin(keep)]
-        else:
-            transactions = df[df["delta_value"] > 0.05 * current_value].head(max_rows)
 
         # drop any zero unit rows
         transactions.drop(transactions[transactions["delta_units"] == 0].index, inplace=True)
@@ -358,5 +371,5 @@ def get_advice(
 
     except Exception as e:
         # any other error
-        traceback.print_exc()
+        print("Error in get_advice route: ", e)
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR

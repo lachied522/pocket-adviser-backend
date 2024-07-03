@@ -5,7 +5,7 @@ import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
 from params import OBJECTIVE_MAP
-from helpers import get_portfolio_value, get_riskfree_rate, merge_portfolio_with_universe
+from helpers import get_portfolio_value, merge_portfolio_with_universe
 from schemas import Profile
 
 DEFAULT_PROFILE = Profile(
@@ -61,13 +61,13 @@ class Optimiser:
         """
         Inverse utility function for optimisation.
         """
-        r_f = get_riskfree_rate() # TO DO
+        r_f = 0.05 # TO DO
         match self.formula:
             case 'treynor':
                 # Treynor ratio = (r_p - r_f) / Beta_p
                 # see https://www.investopedia.com/terms/t/treynorratio.asp
-                r_p = np.dot(a, df["expReturn"].fillna(0) + np.array(additional_factors).sum(axis=0))
-                Beta_p = np.dot(a, df["beta"].fillna(1))
+                r_p = np.dot(a, df["expReturn"] + np.array(additional_factors).sum(axis=0))
+                Beta_p = np.dot(a, df["beta"])
                 # prevent divide by zero by adding small amount to beta
                 U = (r_p - r_f) / (Beta_p if Beta_p != 0 else 0.01)
 
@@ -109,7 +109,13 @@ class Optimiser:
                         method=method, bounds=bnds, constraints=cons,
                         options={'maxiter': maxiter}).x
 
-    def apply_filters(self, df: pd.DataFrame, exclude: List[str] = [], include: List[str] = []):
+    def apply_filters(
+        self,
+        df: pd.DataFrame,
+        exclude: List[str] = [],
+        include: List[str] = [],
+        N: int = 50 # target size of resulting dataframe
+    ):
         """
         Filters working portfolio based on investment style.
         """
@@ -133,42 +139,40 @@ class Optimiser:
 
         # drop stocks until size of df is 50
         to_keep = np.array([])
-        for isEtf, _ in df.groupby("isEtf"):
-            if isEtf:
-                # TO DO
-                pass
-            else:
-                for sector, group in df.groupby("sector"):
-                    if sector not in OBJECTIVE_MAP[self.profile.objective]["sector_allocations"]:
-                        continue
+        for sector, group in df.groupby("sector"):
+            if sector not in OBJECTIVE_MAP[self.profile.objective]["sector_allocations"]:
+                continue
 
-                    # get target number of stocks for this sector based on target sector allocation
-                    num = np.ceil(50 * OBJECTIVE_MAP[self.profile.objective]["sector_allocations"][sector])
-                    q = 0 # increase this until target size is met
-                    sub = group.copy()
-                    while len(sub) > num and q < 1:
-                        # drop stocks that are outside quantiles for beta
-                        lower_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][0])
-                        upper_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][1])
-                        # get quantile for expected return
-                        lower_exp_return = group["expReturn"].quantile(q)                # drop stocks are in top 50% for PEG
-                        # upper_peg = group["PEG"].median()
+            # get target number of stocks for this sector based on target sector allocation
+            # exchange_target = self.profile.international if exchange == "NASDAQ" else 1 - self.profile.international
+            sector_target = OBJECTIVE_MAP[self.profile.objective]["sector_allocations"][sector]
+            num = np.ceil(N * sector_target)
+            q = 0 # increase this until target size is met
+            sub = group.copy()
+            while len(sub) > num and q < 1:
+                # drop stocks that are outside quantiles for beta
+                lower_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][0])
+                upper_beta = group["beta"].quantile(OBJECTIVE_MAP[self.profile.objective]["beta_quantiles"][1])
+                # get quantile for expected return
+                lower_exp_return = group["expReturn"].quantile(q)                # drop stocks are in top 50% for PEG
+                # upper_peg = group["PEG"].median()
 
-                        sub = group[
-                            # (group["symbol"].isin(include)) # keep stocks in include array
-                            (group["units"] > 0) | # keep stocks that are already in the portfolio
-                            (
-                                (group["expReturn"] > lower_exp_return) &
-                                # (df["PEG"] < upper_peg ) &
-                                ((group["beta"] > lower_beta) & (group["beta"] < upper_beta))
-                            )
-                        ]
-                        q += 0.1
+                sub = group[
+                    # (group["symbol"].isin(include)) # keep stocks in include array
+                    (group["units"] > 0) | # keep stocks that are already in the portfolio
+                    (
+                        (group["expReturn"] > lower_exp_return) &
+                        # (df["PEG"] < upper_peg ) &
+                        ((group["beta"] > lower_beta) & (group["beta"] < upper_beta))
+                    )
+                ]
+                q += 0.1
 
-                    to_keep = np.concatenate((to_keep, sub.index.values))
+            to_keep = np.concatenate((to_keep, sub.index.values))
 
         df = df.loc[to_keep]
 
+        # print("Final length ", len(df))
         # print(f"Dropped {initial_size - len(df)} rows from df")
         # must updated a0 to be same shape as new df
         self.a0 = df["units"] * df["previousClose"]
