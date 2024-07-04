@@ -86,3 +86,27 @@ class Universe:
             "id": int(_id),
             **_stock.to_dict()
         }
+    
+    def add_stock(self, stock):
+        """
+        Add a stock to the universe.
+        """
+        df = self.get()
+        index = np.max(df.index.values) + 1
+        # add expected return
+        stock["expReturn"] = (stock.get("priceTarget") / stock.get("previousClose")) - 1
+        self.data.loc[index,:] = stock
+
+        self.data.loc[index,:]
+        
+        return {
+            "id": int(index),
+            **stock,
+        }
+
+    def remove_stock(self, index):
+        """
+        Remove a stock from the universe.
+        """
+        df = self.get()
+        self.data = df.drop(df[df.index == index].index)

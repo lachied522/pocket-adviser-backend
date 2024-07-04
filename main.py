@@ -1,6 +1,12 @@
 import os
+import locale
+import traceback
+
+locale.setlocale(locale.LC_ALL, '')
 
 from dotenv import load_dotenv
+
+load_dotenv()
 
 import numpy as np
 import pandas as pd
@@ -18,28 +24,8 @@ from database import SessionLocal
 from cron import schedule_jobs
 from params import OBJECTIVE_MAP
 from optimiser import Optimiser
-from universe import Universe
 from crud import insert_advice_record
-from helpers import get_user_data, get_portfolio_value, get_sector_allocation
-
-load_dotenv()
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # TO DO
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from helpers import get_user_data, get_portfolio_value, get_sector_allocation, get_stock_by_symbol
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,8 +42,25 @@ async def lifespan(app: FastAPI):
     yield
     print("App Shutdown")
 
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://www.pocketadviser.com.au", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @app.post("/get-advice-by-stock")
-def get_advice_by_stock(
+async def get_advice_by_stock(
     body: GetAdviceByStockRequest,
     response: Response,
     userId: str|None = None,
@@ -77,7 +80,7 @@ def get_advice_by_stock(
     """
     try:
         # check that symbol is valid
-        stock = Universe().get_stock_by_symbol(body.symbol)
+        stock = await get_stock_by_symbol(body.symbol)
         if not stock:
             return {
                 "message": f"Symbol {body.symbol} was not found",
@@ -150,7 +153,7 @@ def get_advice_by_stock(
             if abs(difference) > 0.50:
                 is_recommended_by_income = proposed_units < 0 # True if user wishes to sell
                 risk_message = (
-                    "Given the user's investment objective, the risk of (Beta) of the stock is significantly {f} than recommended. ".format("greater" if difference > 0 else "lower")
+                    "Given the user's investment objective, the dividend yield of the stock appears to be {} than recommended. ".format("greater" if difference > 0 else "lower")
                 )
 
         # check whether proposed transaction is analyst recommended
@@ -174,7 +177,7 @@ def get_advice_by_stock(
         optimiser = Optimiser(current_portfolio, profile)
 
         # get initial adjusted utility
-        initial_adj_utility = str(optimiser.get_utility(current_portfolio))
+        initial_adj_utility = optimiser.get_utility(current_portfolio)
 
         # get adjusted utility after proposed transaction
         proposed_portfolio = current_portfolio.copy()
@@ -186,11 +189,11 @@ def get_advice_by_stock(
             # insert new row
             proposed_portfolio.loc[-1] = { "stockId": stock["id"], "units": proposed_units }
 
-        final_adj_utility = str(optimiser.get_utility(proposed_portfolio))
+        final_adj_utility = optimiser.get_utility(proposed_portfolio)
 
-        is_utility_positive = final_adj_utility > initial_adj_utility
+        is_utility_positive = bool(final_adj_utility > initial_adj_utility)
         utility_message = (
-            "The proposed transaction {} increase the 'adjusted' utility of their portfolio as measured by the Treynor ratio.".format("does" if is_utility_positive else "does not")
+            "The proposed transaction {} the 'adjusted' utility of their portfolio as measured by the Treynor ratio.".format("increases" if is_utility_positive else "decreases")
         )
 
         # append messages together
@@ -205,7 +208,7 @@ def get_advice_by_stock(
         )
 
         return {
-            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} ${body.amount} in {body.symbol}",
+            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} {locale.currency(body.amount, grouping=True)} in {body.symbol}",
             "user_objective": OBJECTIVE_MAP[objective]["description"],
             "is_recommended": is_recommended,
             "message": message,
@@ -214,13 +217,13 @@ def get_advice_by_stock(
             "is_recommended_by_income": is_recommended_by_income,
             "is_analyst_recommended": is_recommended_by_analyst,
             "is_utility_positive": is_utility_positive,
-            "initial_adj_utility": initial_adj_utility,
-            "final_adj_utility": final_adj_utility,
+            "initial_adj_utility": str(initial_adj_utility),
+            "final_adj_utility": str(final_adj_utility),
             "stockData": stock, # return stock data
         }
 
     except Exception as e:
-        print("Error in get_advice_by_stock route: ", e)
+        traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
 @app.post("/get-advice")
@@ -263,7 +266,10 @@ def get_advice(
         # want to select a random sample of stocks from prev_advice records to exclude
         # this will give the appearance of generating a new series of recommendations
         prev_symbols = [transaction["symbol"] for record in prev_advice for transaction in record.transactions]
-        exclude = np.random.choice(prev_symbols, np.random.randint(1, max(len(prev_symbols), 5)), replace=False)
+        if len(prev_symbols) > 0:
+            exclude = np.random.choice(prev_symbols, np.random.randint(1, min(len(prev_symbols), 5)), replace=False)
+        else:
+            exclude = []
         # get optimal portfolio
         optimal_portfolio = optimiser.get_optimal_portfolio(exclude=exclude)
 
@@ -370,6 +376,5 @@ def get_advice(
         }
 
     except Exception as e:
-        # any other error
-        print("Error in get_advice route: ", e)
+        traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR

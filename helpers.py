@@ -7,6 +7,22 @@ from sqlalchemy.orm import Session
 
 import crud
 from universe import Universe
+from data.helpers import get_aggregated_stock_data
+
+async def get_stock_by_symbol(symbol: str):
+    # attempt to fetch stock from universe
+    universe = Universe()
+    stock = universe.get_stock_by_symbol(symbol)
+    if stock is not None:
+        return stock
+    
+    # symbol not in universe, fetch from data provider instead
+    stock = await get_aggregated_stock_data(symbol)
+
+    if stock:
+        stock = universe.add_stock(stock)
+
+    return stock
 
 def get_portfolio_value(portfolio: pd.DataFrame):
     """
