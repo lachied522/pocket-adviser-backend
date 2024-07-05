@@ -2,7 +2,7 @@ import os
 import locale
 import traceback
 
-locale.setlocale(locale.LC_ALL, '')
+locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
 from dotenv import load_dotenv
 
