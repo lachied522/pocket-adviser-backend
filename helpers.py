@@ -51,10 +51,11 @@ def get_user_data(userId: str|None, db: Session):
     Get all holdings and profile that belong to a user.
     """
     if userId is None:
-        # return empty portfolio and profile
+        # return empty portfolio, profile, and advice
         return (
             pd.DataFrame(columns=["stockId", "units"]),
-            None
+            None,
+            []
         )
 
     # could fetch through a join table by sqlalchemy throws an error

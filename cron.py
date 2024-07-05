@@ -90,7 +90,7 @@ def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         refresh_stock_data_by_exchange,
         args=["NASDAQ"],
-        trigger=CronTrigger(hour=9, minute=0, day_of_week='tue-sat'),
+        trigger=CronTrigger(hour=8, minute=0, day_of_week='tue-sat'),
         id="refresh_nasdaq",
         name="Refresh NASDAQ data at 9am AEST",
         max_instances=1
