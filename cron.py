@@ -17,12 +17,14 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
         raise Exception("Exchange must be ASX or NASDAQ")
 
     try:
+        print("Updating data for exchange: ", exchange)
         # initialise db connection
         db = SessionLocal()
         # fetch all symbols for exchange
         stocks = await ApiClient().get_all_stocks_by_exchange(exchange)
         # keep track of updated symbols
         updated = []
+        errored = []
         max_calls = 50
         delay_per_call = 60 / max_calls
         # initialise a min_wait task
@@ -49,9 +51,10 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
                     db.execute(on_conflict_stmt)
                     # append symbol to updated array
                     updated.append(quote['symbol'])
-                    print(f"Data updated for {quote['symbol']}")
+                    print(f"Data updated for {quote['symbol']}", end="\r")
 
             except Exception as e:
+                errored.append(quote['symbol'])
                 print(f"Could not refresh data for {quote['symbol']}: {str(e)}")
 
         # delete all sybmols that were not updated
@@ -66,7 +69,8 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
         db.commit()
         # revalidate universe
         Universe().revalidate()
-        print(f"Data updated for exchange {exchange}")
+        print("Data updated for symbols", ",".join(updated))
+        print("Update errored for symbols", ",".join(errored))
     except Exception as e:
         print(f"Error refreshing data for exchange {exchange}: {str(e)}")
     finally:
@@ -75,17 +79,19 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
 
 def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
-        lambda: refresh_stock_data_by_exchange("ASX"),
+        refresh_stock_data_by_exchange,
+        args=["ASX"],
         trigger=CronTrigger(hour=15, minute=0, day_of_week='mon-fri'),
         id="refresh_asx",
         name="Refresh ASX data at 5pm AEST",
-        replace_existing=True
+        max_instances=1
     )
 
     scheduler.add_job(
-        lambda: refresh_stock_data_by_exchange("NASDAQ"),
+        refresh_stock_data_by_exchange,
+        args=["NASDAQ"],
         trigger=CronTrigger(hour=9, minute=0, day_of_week='tue-sat'),
         id="refresh_nasdaq",
         name="Refresh NASDAQ data at 9am AEST",
-        replace_existing=True
+        max_instances=1
     )

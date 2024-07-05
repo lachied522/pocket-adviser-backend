@@ -46,7 +46,7 @@ async def get_aggregated_stock_data(symbol: str, exchange: str = 'NASDAQ', _quot
         priceTarget = info.get('priceTarget')
 
     return {
-        'symbol': symbol,
+        'symbol': quote.get('symbol'),
         'previousClose': quote.get('price'),
         'changesPercentage': quote.get('changesPercentage'),
         'marketCap': quote.get('marketCap'),
