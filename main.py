@@ -1,8 +1,5 @@
 import os
-import locale
 import traceback
-
-locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
 
 from dotenv import load_dotenv
 
@@ -208,7 +205,7 @@ async def get_advice_by_stock(
         )
 
         return {
-            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} {locale.currency(body.amount, grouping=True)} in {body.symbol}",
+            "proposed_transaction": f"{'Buy' if body.amount > 0 else 'Sell'} ${body.amount:,.2f} in {body.symbol}",
             "user_objective": OBJECTIVE_MAP[objective]["description"],
             "is_recommended": is_recommended,
             "message": message,
