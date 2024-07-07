@@ -10,3 +10,5 @@ scipy
 aiohttp
 APScheduler
 yfinance
+openai
+mailersend

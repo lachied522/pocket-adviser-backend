@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
-from params import OBJECTIVE_MAP
+from .params import OBJECTIVE_MAP
 from helpers import get_portfolio_value, merge_portfolio_with_universe
 from schemas import Profile
 
