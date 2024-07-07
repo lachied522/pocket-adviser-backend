@@ -74,7 +74,7 @@ async def refresh_stock_data_by_exchange(exchange: str) -> None:
 
             except Exception as e:
                 errored.append(quote['symbol'])
-                print(f"Could not refresh data for {quote['symbol']}: {str(e)}")
+                print(f"Could not refresh data for {quote['symbol']}: ", str(e))
 
         # upsert statement for updated symbols
         insert_stmts = insert(Stock).values(to_upsert)

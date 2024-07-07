@@ -64,7 +64,7 @@ class ApiClient:
             return None
         return data[0]
 
-    async def get_news_articles(self, symbols: list, page: int = 0, limit: int = 12) -> list:
+    async def get_news_articles(self, symbols: list[str], page: int = 0, limit: int = 12) -> list:
         params = {
             'tickers': ','.join([s.upper() for s in symbols]),
             'page': str(page),
@@ -78,6 +78,15 @@ class ApiClient:
             'symbol': symbol
         }
         data = await self.make_authenticated_api_request("price-target", params, 4)
+        if not data:
+            return None
+        return data
+
+    async def get_performance(self, symbols: str|list[str]) -> Optional[dict]:
+        # this endpoint can be batched
+        if type(symbols) == "list":
+            symbols = ",".join(symbols)
+        data = await self.make_authenticated_api_request(f"stock-price-change/{symbols}")
         if not data:
             return None
         return data

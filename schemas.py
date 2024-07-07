@@ -56,7 +56,10 @@ class Advice(BaseModel):
 
 class User(BaseModel):
     id: str
-
+    name: Optional[str]
+    email: Optional[str]
+    accountType: str
+    mailFrequency: Optional[str]
     holdings: List[Holding]
     advice: List[Advice]
     profile: Optional[Profile]

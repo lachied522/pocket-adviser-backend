@@ -12,6 +12,9 @@ def get_stock_by_symbol(symbol: str, db: Session):
     # fetch stock where symbol matches param
     return db.query(models.Stock).filter(models.Stock.symbol == symbol.upper()).first()
 
+def get_all_users(db: Session):
+    return db.query(models.User).all()
+
 def get_user_record(userId: str, db: Session):
     return db.query(models.User).filter(models.User.id == userId).first()
 

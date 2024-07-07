@@ -12,11 +12,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from advice.functions import get_recom_transactions, should_buy_or_sell_stock
-from cron import schedule_jobs
-from crud import insert_advice_record
+from data.cron import schedule_jobs
+from advice.single_stock import get_stock_recommendation
+from advice.portfolio import get_recom_transactions
+from crud import get_user_record, insert_advice_record
 from database import SessionLocal
-from helpers import get_portfolio_value, get_stock_by_symbol, get_user_data
+from helpers import get_portfolio_value, get_stock_by_symbol
 from schemas import GetAdviceByStockRequest, GetRecommendationsRequest
 
 @asynccontextmanager
@@ -61,31 +62,32 @@ async def get_advice_by_stock(
     """
     Provides information on whether a transaction of amount (amount) in stock (symbol) is recommended \
     based on current portfolio and investment profile. Negative amount for sells.
-
-    The following are considered when making recommendation.
-
-    1. Overall portfolio risk (as measured by Beta)
-    2. Target sector allocations.
-    3. Income of the portfolio.
-    4. Analyst price targets.
-    5. Utility of portfolio before and after proposed transaction.
     """
     try:
         # check that symbol is valid
         stock = await get_stock_by_symbol(body.symbol)
         if not stock:
+            response.status_code = status.HTTP_400_BAD_REQUEST
             return {
-                "message": f"Symbol {body.symbol} was not found",
-                "statusCode": 400
+                "message": "Stock not found"
             }
 
-        # fetch data
-        portfolio, profile, _ = get_user_data(userId, db)
-        return should_buy_or_sell_stock(stock, portfolio, profile, body.amount)
+        # fetch user
+        user = get_user_record(userId, db)
+        if not user:
+            response.status_code = status.HTTP_400_BAD_REQUEST
+            return {
+                "message": "User not found"
+            }
+
+        return get_stock_recommendation(stock, user, body.amount)
 
     except Exception as e:
         traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return {
+            "message": e
+        }
 
 @app.post("/get-advice")
 def get_advice(
@@ -105,9 +107,9 @@ def get_advice(
         else:
             amount = 0
 
-        current_portfolio, profile, prev_advice = get_user_data(userId, db)
+        user = get_user_record(userId, db)
         # get current portfolio value
-        current_value = get_portfolio_value(current_portfolio)
+        current_value = get_portfolio_value(user.holdings)
         # handle edge case where implied portfolio value is zero or less
         if current_value + amount <= 0:
             if body.action == "review":
@@ -116,13 +118,12 @@ def get_advice(
                 amount = 1000
             else:
                 # TO DO
-                response.status_code = 400
+                response.status_code = status.HTTP_400_BAD_REQUEST
                 return {
                     "message": "The implied value of the user's portfolio is less than or equal to zero.",
-                    "transactions": [],
                 }
 
-        res = get_recom_transactions(current_portfolio, profile, prev_advice)
+        res = get_recom_transactions(user, amount)
 
         # insert advice record
         if userId is not None:
@@ -140,3 +141,6 @@ def get_advice(
     except Exception as e:
         traceback.print_exc()
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        return {
+            "message": e
+        }

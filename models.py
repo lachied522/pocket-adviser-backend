@@ -7,6 +7,10 @@ from database import Base
 class User(Base):
     __tablename__ = 'User'
     id = Column(String, primary_key=True)
+    name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    accountType = Column(String)
+    mailFrequency = Column(String)
 
     profile = relationship('Profile', backref=backref('user'), lazy='joined')
     holdings = relationship('Holding', backref=backref('user'), lazy='joined')

@@ -4,9 +4,10 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
 
-from .params import OBJECTIVE_MAP
-from helpers import get_portfolio_value, merge_portfolio_with_universe
 from schemas import Profile
+from universe import Universe
+from helpers import get_portfolio_value
+from .params import OBJECTIVE_MAP
 
 DEFAULT_PROFILE = Profile(
     userId="",
@@ -15,6 +16,22 @@ DEFAULT_PROFILE = Profile(
     passive=30,
     preferences={},
 )
+
+def merge_portfolio_with_universe(portfolio: pd.DataFrame|list):
+    if type(portfolio) == "list":
+        portfolio = pd.DataFrame.from_records(portfolio)
+
+    universe = Universe().get()
+
+    if portfolio.empty:
+        merged = universe.copy()
+        merged["stockId"] = universe.index
+        merged["units"] = np.zeros(len(merged))
+    else:
+        merged = pd.merge(universe, portfolio[["stockId", "units"]], left_index=True, right_on='stockId', how='left').reset_index(drop=True)
+        merged["units"] = merged["units"].fillna(0)
+
+    return merged
 
 class Optimiser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
@@ -38,10 +55,18 @@ class Optimiser:
         threshold: float = 0.05,
         formula: str = 'treynor'
     ):
-        self.portfolio = portfolio if type(portfolio) == pd.DataFrame else pd.DataFrame.from_records(portfolio)
-        self.profile = profile if profile else DEFAULT_PROFILE
+        # set portfolio
+        if type(portfolio) == "list":
+            portfolio = pd.DataFrame.from_records(portfolio)
+        self.portfolio = portfolio
+        # set profile
+        if profile is None:
+            profile = DEFAULT_PROFILE
+        self.profile = profile
         # set target value
-        self.target = target if target else get_portfolio_value(portfolio)
+        if target is None:
+            target = get_portfolio_value(portfolio)
+        self.target = target
 
         self.size = size
         self.error = error
@@ -323,7 +348,7 @@ class Optimiser:
         self.optimal_portfolio = df.drop(df[df['units'] < 1].index)
         return self.optimal_portfolio
 
-    def get_utility(self, portfolio: pd.DataFrame):
+    def get_utility(self, portfolio: pd.DataFrame|list):
         """
         Helper function for obtaining the adjusted utility of a portfolio.
         """

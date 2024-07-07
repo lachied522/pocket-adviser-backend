@@ -2,8 +2,8 @@ from mailersend import emails
 
 mailer = emails.NewEmail() # api key is fetched implicitly
 
-async def send_email(
-    recipient_name: str,
+def send_email(
+    recipient_name: str|None,
     recipient_email: str,
     subject: str,
     content: str,
@@ -20,15 +20,15 @@ async def send_email(
             "email": sender_email,
         }
 
-        recipients = [
-            {
-                "name": recipient_name,
-                "email": recipient_email,
-            }
-        ]
+        recipient = {
+            "email": recipient_email
+        }
+
+        if recipient_name:
+            recipient["name"] = recipient_name
 
         mailer.set_mail_from(mail_from, mail_body)
-        mailer.set_mail_to(recipients, mail_body)
+        mailer.set_mail_to(recipient, mail_body)
         mailer.set_subject(subject, mail_body)
         mailer.set_html_content(content, mail_body)
         mailer.set_plaintext_content(content, mail_body) # TO DO:

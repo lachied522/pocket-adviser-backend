@@ -12,3 +12,5 @@ APScheduler
 yfinance
 openai
 mailersend
+Jinja2
+markdown
