@@ -2,16 +2,24 @@ import os
 import aiohttp
 import json
 
-from datetime import datetime
+# from datetime import datetime
 
-async def search_web(query: str, date: str = None) -> dict:
+def format_response(res):
+    """
+    Format response from search_web function for reading by LLM
+    """
+    return {
+        "query": res["query"],
+        "answer": res["answer"],
+        "results": [{
+            "title": result["title"],
+            "content": result["content"],
+            "url": result["url"],
+        } for result in res["results"]]
+    }
+
+async def search_web(query: str) -> dict:
     try:
-        # Adding date to query helps to get current information
-        if date is None:
-            date = datetime.now().strftime('%#d %B %Y')
-
-        query = f"{query} {date}"
-
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 'https://api.tavily.com/search',
@@ -31,6 +39,6 @@ async def search_web(query: str, date: str = None) -> dict:
                     raise Exception("Error searching web")
 
                 data = await response.json()
-                return data
+                return format_response(data)
     except Exception as e:
         return None

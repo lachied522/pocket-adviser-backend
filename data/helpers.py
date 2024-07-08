@@ -1,6 +1,6 @@
 import asyncio
 
-from data.fmp import ApiClient
+from data.financial_modelling_prep import ApiClient
 from data.yahoo import get_stock_info # backup data source
 
 async def get_aggregated_stock_data(symbol: str, exchange: str = 'NASDAQ', _quote: dict = None):

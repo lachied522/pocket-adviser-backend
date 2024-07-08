@@ -2,9 +2,8 @@
 import numpy as np
 import pandas as pd
 
-from sqlalchemy.orm import Session
-
 from universe import Universe
+from schemas import User
 from data.helpers import get_aggregated_stock_data
 
 async def get_stock_by_symbol(symbol: str):
@@ -37,27 +36,12 @@ def get_portfolio_value(portfolio: pd.DataFrame|list[dict]):
 
     return value
 
-def get_sector_allocation(portfolio: pd.DataFrame|list, sector: str):
-    """
-    Get current sector allocation for a portfolio.
-    """
-    value = 0
-    if type(portfolio) == pd.DataFrame:
-        portfolio = portfolio.to_dict(orient='records')
-
-    for holding in portfolio:
-        stock = Universe().get_stock_by_id(holding["stockId"])
-        if stock and stock["sector"] == sector:
-            value += holding["units"] * stock["previousClose"]
-
-    return value
-
-def convert_holdings_to_dataframe(holdings: list):
+def get_portfolio_as_dataframe(user: User):
     """
     Get all holdings and profile that belong to a user.
     """
-    if (len(holdings) > 0):
-        df = pd.DataFrame.from_records([m.__dict__ for m in holdings], index='id').drop('_sa_instance_state', axis=1)
+    if (len(user.holdings) > 0):
+        df = pd.DataFrame.from_records([m.__dict__ for m in user.holdings], index='id').drop('_sa_instance_state', axis=1)
     else:
         df = pd.DataFrame(columns=["stockId", "units"])
 

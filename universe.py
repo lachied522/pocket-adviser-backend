@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from crud import get_all_stocks
-from data.fmp import ApiClient
+from data.financial_modelling_prep import ApiClient
 
 class Universe:
     data: pd.DataFrame = pd.DataFrame()
@@ -110,3 +110,16 @@ class Universe:
         """
         df = self.get()
         self.data = df.drop(df[df.index == index].index)
+
+    def merge_with_portfolio(self, portfolio: pd.DataFrame):
+        df = self.get()
+
+        if portfolio.empty:
+            merged = df.copy()
+            merged["stockId"] = df.index
+            merged["units"] = np.zeros(len(merged))
+        else:
+            merged = pd.merge(df, portfolio[["stockId", "units"]], left_index=True, right_on='stockId', how='left').reset_index(drop=True)
+            merged["units"] = merged["units"].fillna(0)
+
+        return merged

@@ -7,7 +7,8 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 from schemas import Profile
 from universe import Universe
 from helpers import get_portfolio_value
-from .params import OBJECTIVE_MAP
+
+from advice.params import OBJECTIVE_MAP
 
 DEFAULT_PROFILE = Profile(
     userId="",
@@ -16,22 +17,6 @@ DEFAULT_PROFILE = Profile(
     passive=30,
     preferences={},
 )
-
-def merge_portfolio_with_universe(portfolio: pd.DataFrame|list):
-    if type(portfolio) == "list":
-        portfolio = pd.DataFrame.from_records(portfolio)
-
-    universe = Universe().get()
-
-    if portfolio.empty:
-        merged = universe.copy()
-        merged["stockId"] = universe.index
-        merged["units"] = np.zeros(len(merged))
-    else:
-        merged = pd.merge(universe, portfolio[["stockId", "units"]], left_index=True, right_on='stockId', how='left').reset_index(drop=True)
-        merged["units"] = merged["units"].fillna(0)
-
-    return merged
 
 class Optimiser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
@@ -46,7 +31,7 @@ class Optimiser:
 
     def __init__(
         self,
-        portfolio: list|pd.DataFrame,
+        portfolio: pd.DataFrame,
         profile: Profile|None,
         target: float|None = 0,
         size: int = 20,
@@ -55,9 +40,6 @@ class Optimiser:
         threshold: float = 0.05,
         formula: str = 'treynor'
     ):
-        # set portfolio
-        if type(portfolio) == "list":
-            portfolio = pd.DataFrame.from_records(portfolio)
         self.portfolio = portfolio
         # set profile
         if profile is None:
@@ -325,7 +307,7 @@ class Optimiser:
 
     def get_optimal_portfolio(self, exclude: List[str] = [], include: List[str] = []):
         # get a working copy of the portfolio
-        df = merge_portfolio_with_universe(self.portfolio)
+        df = Universe().merge_with_portfolio(self.portfolio)
 
         # apply filters
         df = self.apply_filters(df, exclude, include)
@@ -348,11 +330,11 @@ class Optimiser:
         self.optimal_portfolio = df.drop(df[df['units'] < 1].index)
         return self.optimal_portfolio
 
-    def get_utility(self, portfolio: pd.DataFrame|list):
+    def get_utility(self, portfolio: pd.DataFrame):
         """
         Helper function for obtaining the adjusted utility of a portfolio.
         """
-        df = merge_portfolio_with_universe(portfolio)
+        df = Universe().merge_with_portfolio(portfolio)
         # extract amount
         a = df["units"].fillna(0) * df["previousClose"]
         return -self.inv_utility_function(a, df, self.get_additional_factors(df), include_penalty=False)

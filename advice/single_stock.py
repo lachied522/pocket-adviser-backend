@@ -2,9 +2,25 @@ import pandas as pd
 import numpy as np
 
 from schemas import User
-from helpers import get_portfolio_value, get_sector_allocation
-from .optimiser import Optimiser
-from .params import OBJECTIVE_MAP
+from universe import Universe
+from helpers import get_portfolio_as_dataframe
+from advice.optimiser import Optimiser
+from advice.params import OBJECTIVE_MAP
+
+def get_sector_allocation(portfolio: pd.DataFrame|list, sector: str):
+    """
+    Get current sector allocation for a portfolio.
+    """
+    value = 0
+    if type(portfolio) == pd.DataFrame:
+        portfolio = portfolio.to_dict(orient='records')
+
+    for holding in portfolio:
+        stock = Universe().get_stock_by_id(holding["stockId"])
+        if stock and stock["sector"] == sector:
+            value += holding["units"] * stock["previousClose"]
+
+    return value
 
 def get_stock_recommendation(
     stock: dict,
@@ -25,7 +41,7 @@ def get_stock_recommendation(
     # get proposed number of units by dividing by previousClose
     proposed_units = round(amount / stock["previousClose"])
     # check if existing holding
-    existing_holding = [holding for holding in user.holdings if holding["stockId"] == stock["id"]][0] if "id" in stock else None
+    existing_holding = [holding for holding in user.holdings if holding.stockId == stock["id"]][0] if "id" in stock else None
     # edge case where user wishes to sell stock not in portfolio
     if proposed_units < 0 and existing_holding is None:
         raise Exception("User does not hold {}".format(stock["symbol"]))
@@ -100,23 +116,21 @@ def get_stock_recommendation(
 
     # finally, check whether portfolio utility is increased by transaction
     # initialise optimiser
-    optimiser = Optimiser(user.holdings, user.profile)
+    current_portfolio = get_portfolio_as_dataframe(user)
+    optimiser = Optimiser(current_portfolio, user.profile[0])
 
     # get initial adjusted utility
-    initial_adj_utility = optimiser.get_utility(user.holdings)
+    initial_adj_utility = optimiser.get_utility(current_portfolio)
 
     # get adjusted utility after proposed transaction
-    proposed_portfolio = user.holdings.copy()
+    proposed_portfolio = current_portfolio.copy()
     if existing_holding is None:
         # insert proposed holding
-        proposed_portfolio.append({
-            "stockId": stock["id"],
-            "units": proposed_units
-        })
+        proposed_portfolio.loc[-1] = { "stockId": stock["id"], "units": proposed_units }
     else:
         # update existing row
-        index = user.holdings.index(existing_holding)
-        proposed_portfolio[index]["units"] = max(existing_holding["units"] + proposed_units, 0)
+        index = existing_holding.index[0]
+        proposed_portfolio.loc[index, "units"] = max(existing_holding["units"].iloc[0] + proposed_units, 0)
 
     final_adj_utility = optimiser.get_utility(proposed_portfolio)
 

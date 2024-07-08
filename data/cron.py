@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from data.helpers import get_aggregated_stock_data
-from data.fmp import ApiClient
+from data.financial_modelling_prep import ApiClient
 from universe import Universe
 from models import Stock
 from database import SessionLocal

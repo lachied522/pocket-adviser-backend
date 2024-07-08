@@ -18,9 +18,6 @@ def get_users_by_email_frequency(freq: str):
     return users
 
 async def send_all_emails(freq: str):
-    if not freq in ["daily", "weekly", "monthly"]:
-        raise Exception("Frequency must be one of daily, weekly, or monthly")
-    
     try:
         # get users
         users = get_users_by_email_frequency(freq)
@@ -36,7 +33,7 @@ async def send_all_emails(freq: str):
                 file_path = await construct_html_body_for_email(user)
 
                 # read file
-                with open(file_path, 'r') as file:
+                with open(file_path, 'r', encoding='utf-8') as file:
                     html_content = file.read()
 
                 send_email(
@@ -46,12 +43,12 @@ async def send_all_emails(freq: str):
                     html_content,
                 )
 
+                print(f"Email sent for {user.id}")
             except Exception as e:
                 print(f"Could not send email for {user.id}: ", str(e))
         
     except Exception as e:
         traceback.print_exc()
-
 
 def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
@@ -75,7 +72,7 @@ def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         send_all_emails,
         args=["MONTHLY"],
-        trigger=CronTrigger(day='first', hour=9, minute=0),
+        trigger=CronTrigger(hour=9, minute=0, day='first'),
         id="monthly_emails",
         name="Send monthly emails on last day of month at 9am",
         max_instances=1

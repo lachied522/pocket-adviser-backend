@@ -24,6 +24,7 @@ class ApiClient:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as response:
                 if not response.status == 200:
+                    print(response.json())
                     raise Exception(f"Error making API request, status: {response.status}")
                 return await response.json()
 
@@ -84,9 +85,11 @@ class ApiClient:
 
     async def get_performance(self, symbols: str|list[str]) -> Optional[dict]:
         # this endpoint can be batched
-        if type(symbols) == "list":
+        if isinstance(symbols, list):
             symbols = ",".join(symbols)
+        
         data = await self.make_authenticated_api_request(f"stock-price-change/{symbols}")
+
         if not data:
             return None
         return data

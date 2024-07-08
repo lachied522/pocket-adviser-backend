@@ -18,7 +18,7 @@
                 width: 100%;
                 font-weight: 500;
             }
-            th {
+            thead {
                 background-color: #f2f2f2;
                 border: 1px solid #dddddd;
                 text-align: left;
@@ -41,9 +41,14 @@
                 text-align: center;
                 color: #666;
             }
-            .article-container {
+            .hyperlink {
+                text-decoration: underline;
+                color: deepskyblue;
+            }
+            /* .article-container {
                 display: flex;
                 flex-wrap: wrap;
+                align-items: center;
                 gap: 20px;
             }
             .article {
@@ -52,8 +57,6 @@
                 border-radius: 10px;
                 overflow: hidden;
                 width: 192px;
-                /* height: 144px; */
-                /* box-shadow: 0 2px 4px rgba(0,0,0,0.1); */
                 transition: transform 0.2s ease;
             }
             .article img {
@@ -103,17 +106,28 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-            }
+            } */
         </style>
     </head>
     <body>
-        <h3>Market update {{ date }}</h3>
-        
-        <p class="main-text">{{ body }}</p>
+        {% if name %}
+        <span>Good morning {{ name }},</span>
+        {% else %}
+        <span>Hi there!</span>
+        {% endif %}
+        <p>
+            Below is your {{ freq }} market update and trade ideas from Pocket Adviser. 
+            Please bear in mind that Pocket Adviser can make mistakes. 
+            Please double-check important information and contact a financial adviser if you require advice. 
+            Otherwise, happy investing!
+        </p>
+        <p class="main-text">
+            {{ body }}
+        </p>
 
-        <h3>Trade ideas</h3>
+        <h3>Trade Ideas</h3>
 
-        {% if articles|length < 1 %}
+        {% if transactions|length < 1 %}
         <div class="empty-message">No trade ideas were generated</div>
         {% else %}
         <table>
@@ -129,9 +143,9 @@
             </thead>
 
             <tbody>
-                {% for row in dataframe %}
+                {% for row in transactions %}
                 <tr>
-                    <td>{{ row.transaction }}</td>
+                    <td><b>{{ row.transaction }}</b></td>
                     <td>{{ row.symbol }}</td>
                     <td>{{ row.name }}</td>
                     <td>{{ row.units }}</td>
@@ -143,7 +157,12 @@
         </table>
         {% endif %}
 
-        <h3>Articles you might like</h3>
+        <br />
+        <br />
+        <br />
+        <p>Continue the conversation at <a href="https://www.pocketadviser.com.au" target="_blank" class="hyperlink">pocketadviser.com.au</a></p>
+
+        <!-- <h3>Articles You Might Like</h3>
 
         <div class="article-container">
             {% for article in articles %}
@@ -157,6 +176,6 @@
                 </a>
             </div>
             {% endfor %}
-        </div>
+        </div> -->
     </body>
 </html>

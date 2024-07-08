@@ -62,7 +62,7 @@ class User(BaseModel):
     mailFrequency: Optional[str]
     holdings: List[Holding]
     advice: List[Advice]
-    profile: Optional[Profile]
+    profile: Optional[List[Profile]]
 
     class Config:
         from_attributes = True

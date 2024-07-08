@@ -4,9 +4,27 @@ import pandas as pd
 import numpy as np
 
 from schemas import User
-from helpers import get_portfolio_value, convert_holdings_to_dataframe
+from helpers import get_portfolio_value, get_portfolio_as_dataframe
 from .optimiser import Optimiser
 from .params import OBJECTIVE_MAP
+
+def get_symbols_to_exclude(user: User):
+    # want to select a random sample of stocks from recent advice records to exclude
+    # this will give the impression of generating fresh recommendations
+    exclude = []
+    if (len(user.advice) > 0):
+        now = datetime.now()
+        sample_space = []
+        for record in user.advice:
+            if now - record.createdAt > timedelta(days=1):
+                continue
+            sample_space += [transaction["symbol"] for transaction in record.transactions]
+        if len(sample_space) > 1:
+            exclude = np.random.choice(sample_space, np.random.randint(1, min(len(sample_space), 5)), replace=False)
+        else:
+            exclude = sample_space
+
+    return exclude
 
 def get_transactions_from_optimal_portfolio(
     current_portfolio: pd.DataFrame|list[dict],
@@ -94,29 +112,21 @@ def get_transactions_from_optimal_portfolio(
     return transactions.to_dict(orient='records')
 
 def get_recom_transactions(user: User, amount: float = 0):
-    # want to select a random sample of stocks from recent advice records to exclude
-    # this will give the impression of generating fresh recommendations
-    exclude = []
-    if (len(user.advice) > 0):
-        now = datetime.now()
-        symbols_to_exclude = [record["symbol"] for record in user.advice if now - record.createdAt < timedelta(days=1)]
-        exclude = np.random.choice(symbols_to_exclude, np.random.randint(1, min(len(symbols_to_exclude), 5)), replace=False)
-        
-    current_value = get_portfolio_value(user.holdings)
-    
+    current_portfolio = get_portfolio_as_dataframe(user)
+    current_value = get_portfolio_value(current_portfolio)
     # initialise optimiser
-    optimiser = Optimiser(user.holdings, user.profile, current_value + amount)
+    optimiser = Optimiser(current_portfolio, user.profile[0], current_value + amount)
     # get optimal portfolio
+    exclude = get_symbols_to_exclude(user)
     optimal_portfolio = optimiser.get_optimal_portfolio(exclude=exclude)
     # get transactions
-    current_portfolio = convert_holdings_to_dataframe(user.holdings)
     transactions = get_transactions_from_optimal_portfolio(current_portfolio, optimal_portfolio, amount)
 
     # get adjusted utility before and after recommended transactions
     initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
     # message to help LLM understand function output
     message = (
-        "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[user.profile.objective if user.profile else "RETIREMENT"]["description"]) +
+        "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[user.profile[0].objective if user.profile[0] else "RETIREMENT"]["description"]) +
         "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
     )
 
