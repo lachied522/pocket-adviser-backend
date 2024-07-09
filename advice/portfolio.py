@@ -150,7 +150,7 @@ def get_transactions_from_optimal_portfolio(
     # convert to records before returning
     return transactions.to_dict(orient='records')
 
-def get_recom_transactions(user: User|None, amount: float = 0):
+def get_recom_transactions(user: User|None, amount: float = 0) -> dict:
     current_portfolio = get_portfolio_from_user(user)
     profile = get_profile_from_user(user)
     current_value = get_portfolio_value(current_portfolio)

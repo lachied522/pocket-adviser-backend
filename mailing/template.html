@@ -116,15 +116,11 @@
         <span>Hi there!</span>
         {% endif %}
         <p>
-            Below is your {{ freq }} market update and trade ideas from Pocket Adviser. 
+            Below are your {{ freq }} trade ideas and market update from Pocket Adviser. 
             Please bear in mind that Pocket Adviser can make mistakes. 
             Please double-check important information and contact a financial adviser if you require advice. 
             Otherwise, happy investing!
         </p>
-        <p class="main-text">
-            {{ body }}
-        </p>
-
         <h3>Trade Ideas</h3>
 
         {% if transactions|length < 1 %}
@@ -156,8 +152,9 @@
             </tbody>
         </table>
         {% endif %}
-
-        <br />
+        <p class="main-text">
+            {{ body }}
+        </p>
         <br />
         <br />
         <p>Continue the conversation at <a href="https://www.pocketadviser.com.au" target="_blank" class="hyperlink">pocketadviser.com.au</a></p>

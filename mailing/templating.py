@@ -77,7 +77,7 @@ async def get_main_text(
     # we want a mix of stocks from the user's portfolio and the recommended transactions
     # limit to 10
     sorted_changes = sorted([(key, abs(value['percent_change'])) for key, value in change_map.items() if key != "total"], key=lambda item: item[1])
-    sorted_transactions = sorted([(transaction['symbol'], abs(transaction['value'])) for transaction in transactions], key=lambda item: item[1])
+    sorted_transactions = sorted([(transaction['symbol'], abs(transaction['units'] * transaction['price'])) for transaction in transactions], key=lambda item: item[1])
     symbols_of_interest = list(set(
         [item[0] for item in sorted_changes][:10 - len(sorted_transactions)] +
         [item[0] for item in sorted_transactions]
@@ -114,8 +114,14 @@ async def get_main_text(
             f"{freq.lower()}_change": change_map[symbol] if symbol in change_map else "N/A"
         })
 
-    content += "User's portfolio:\n\n{}".format(portfolio[["symbol", "name", "units"]].to_dict(orient="records"))
-
+    # content += "\n\nUser's portfolio:\n\n{}".format(
+    #     json.dumps({
+    #         "current_value": (portfolio["units"] * portfolio["previousClose"]).sum(),
+    #         "total_change": change_map["total"],
+    #         "holdings": portfolio[["symbol", "name", "units"]].to_dict(orient="records")
+    #     })
+    # )
+    
     messages = [
         {"role": "system", "content": SYSTEM_MESSAGE},
         {"role": "user", "content": content}
@@ -160,6 +166,15 @@ async def calculate_portfolio_changes(
 
     return change_map
 
+def format_transactions(transactions: list[dict]):
+    # format transactions
+    for transaction in transactions:
+        transaction["transaction"] = "Buy" if transaction["units"] > 0 else "Sell"
+        transaction["value"] = "$  {:,.2f}".format(transaction["price"] * transaction["units"])
+        transaction["price"] = "$  {:,.2f}".format(transaction["price"])
+
+    return transactions
+
 async def get_content(user: User):
     # Step 0: populate user's portfolio with stock info
     portfolio = Universe().merge_with_portfolio(get_portfolio_from_user(user))
@@ -171,10 +186,6 @@ async def get_content(user: User):
     # Step 2: get recommended transactions
     # want to get
     transactions = get_recom_transactions(user)["transactions"]
-    # populate transactions
-    for transaction in transactions:
-        transaction["transaction"] = "Buy" if transaction["units"] > 0 else "Sell"
-        transaction["value"] = transaction["price"] * transaction["units"]
 
     # Step 3: get market update
     # use profile to determine region as Australia or US
@@ -184,7 +195,7 @@ async def get_content(user: User):
 
     return {
         "body": body,
-        "transactions": transactions,
+        "transactions": format_transactions(transactions),
         # "articles": articles
     }
 
@@ -197,7 +208,7 @@ async def construct_html_body_for_email(
     # Step 1.5: convert body text to markdown
     content["body"] = markdown(content["body"])
     # Step 2: load template
-    env = Environment(loader=FileSystemLoader('.'))
+    env = Environment(loader=FileSystemLoader('./mailing'))
     template = env.get_template('template.html')
     # Step 3: render template
     html_output = template.render(name=user.name, freq=user.mailFrequency.lower(), **content)
