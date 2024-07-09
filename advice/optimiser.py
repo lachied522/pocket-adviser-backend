@@ -6,24 +6,14 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 
 from schemas import Profile
 from universe import Universe
-from helpers import get_portfolio_value
 
 from advice.params import OBJECTIVE_MAP
-
-DEFAULT_PROFILE = Profile(
-    userId="",
-    objective="RETIREMENT",
-    international=70,
-    passive=30,
-    preferences={},
-)
 
 class Optimiser:
     portfolio: pd.DataFrame # symbol, units, cost, for each stock held by user
     profile: Profile
     objective: str
     target: float # target portfolio value
-    size: int = 20 # target size of portfolio
     error: float = 0.03 # margin for error when using target weights or amounts
     bias: float = 0.05 # bias placed on stocks based on preferences
     threshold: float = 0.05 # minimum weight for stock to be included in optimal portfolio
@@ -34,23 +24,15 @@ class Optimiser:
         portfolio: pd.DataFrame,
         profile: Profile|None,
         target: float|None = 0,
-        size: int = 20,
         error: float = 0.03,
         bias: float = 0.05,
         threshold: float = 0.05,
         formula: str = 'treynor'
     ):
         self.portfolio = portfolio
-        # set profile
-        if profile is None:
-            profile = DEFAULT_PROFILE
         self.profile = profile
-        # set target value
-        if target is None:
-            target = get_portfolio_value(portfolio)
         self.target = target
 
-        self.size = size
         self.error = error
         self.bias = bias
         self.threshold = threshold
@@ -98,18 +80,12 @@ class Optimiser:
         df: pd.DataFrame,
         additional_factors: list = [],
         a0: np.ndarray|list = [],
+        bnds: Bounds = Bounds(0, 1, keep_feasible=True),
         cons: Tuple[list] = tuple(),
         include_penalty: bool = True,
         method: str = "SLSQP",
         maxiter: int = 200
     ):
-        # define boundaries
-        # lower bound equal to zero (no shorts)
-        lb = np.zeros(len(df))
-        # upper bound equal to total value of portfolio
-        ub = self.target * np.ones(len(df)) / self.size
-        # set keep_feasible True to ensure iterations remain within bounds
-        bnds = Bounds(lb, ub, keep_feasible=True)
         # define first guess for minimiser as equal weight
         equal_weight = self.target * np.ones(len(df)) / len(df)
         return minimize(self.inv_utility_function, equal_weight, args=(df, additional_factors, a0, include_penalty),
@@ -185,7 +161,7 @@ class Optimiser:
         self.a0 = df["units"] * df["previousClose"]
         return df
 
-    def get_sector_allocation(self):
+    def get_sector_allocations(self):
         """
         Returns target sector allocation for optimisation based on objective and preferences if any.
         """
@@ -252,7 +228,7 @@ class Optimiser:
 
         # sector constraints
         sector_cons = []
-        sector_allocation_map = self.get_sector_allocation()
+        sector_allocation_map = self.get_sector_allocations()
         if sector_allocation_map is not None:
             # avoid multi collinearity by removing one of the sectors
             target_sectors = list(sector_allocation_map.items())[:-1]
@@ -286,6 +262,21 @@ class Optimiser:
             international_cons
             # locked_cons
         )
+    
+    def get_bounds(self, df: pd.DataFrame) -> Bounds:
+        # lower bound equal to zero (no shorts)
+        lb = np.zeros(len(df))
+        # upper bound determined by total value of portfolio
+        size = 1
+        if self.target < 10_000:
+            size = 4 # max $2,500 each
+        elif self.target < 50_000:
+            size = 10 # max $5,000 each
+        else:
+            size = 20 # max 5% each
+        ub = self.target * np.ones(len(df)) / size
+        # set keep_feasible True to ensure iterations remain within bounds
+        return Bounds(lb, ub, keep_feasible=True)
 
     def get_additional_factors(self, df: pd.DataFrame) -> list:
         additional_factors = []
@@ -312,6 +303,9 @@ class Optimiser:
         # apply filters
         df = self.apply_filters(df, exclude, include)
 
+        # get bounds
+        bnds = self.get_bounds(df)
+
         # get constraints
         cons = self.get_constraints(df)
 
@@ -322,7 +316,7 @@ class Optimiser:
         a0 = df['units'].fillna(0) * df['previousClose']
 
         # SLSQP appears to perform the best
-        a = self.optimise(df, additional_factors, a0, cons=cons)
+        a = self.optimise(df, additional_factors, a0, cons=cons, bnds=bnds)
 
         # update units column of optimal portfolio and return
         df['units'] = np.round(a / df['previousClose'])

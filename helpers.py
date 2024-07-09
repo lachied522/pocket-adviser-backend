@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from universe import Universe
-from schemas import User
+from schemas import User, Profile
 from data.helpers import get_aggregated_stock_data
 
 async def get_stock_by_symbol(symbol: str):
@@ -36,13 +36,26 @@ def get_portfolio_value(portfolio: pd.DataFrame|list[dict]):
 
     return value
 
-def get_portfolio_as_dataframe(user: User):
+def get_portfolio_from_user(user: User|None):
     """
     Get all holdings and profile that belong to a user.
     """
-    if (len(user.holdings) > 0):
+    if user and len(user.holdings) > 0:
         df = pd.DataFrame.from_records([m.__dict__ for m in user.holdings], index='id').drop('_sa_instance_state', axis=1)
     else:
         df = pd.DataFrame(columns=["stockId", "units"])
 
     return df
+
+def get_profile_from_user(user: User|None):
+    if user:
+        return user.profile[0]
+    # return a default profile
+    return Profile(
+        userId="",
+        objective="RETIREMENT",
+        international=70,
+        passive=30,
+        preferences={},
+    )
+    

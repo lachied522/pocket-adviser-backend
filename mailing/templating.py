@@ -9,7 +9,7 @@ from markdown import markdown
 
 from schemas import User, Holding
 from universe import Universe
-from helpers import get_portfolio_as_dataframe
+from helpers import get_portfolio_from_user, get_profile_from_user
 
 from ai.functions import openai_call
 from ai.search import search_web
@@ -162,7 +162,7 @@ async def calculate_portfolio_changes(
 
 async def get_content(user: User):
     # Step 0: populate user's portfolio with stock info
-    portfolio = Universe().merge_with_portfolio(get_portfolio_as_dataframe(user))
+    portfolio = Universe().merge_with_portfolio(get_portfolio_from_user(user))
     portfolio = portfolio[portfolio["units"] > 0]
 
     # Step 1: get portfolio changes
@@ -177,14 +177,10 @@ async def get_content(user: User):
         transaction["value"] = transaction["price"] * transaction["units"]
 
     # Step 3: get market update
-    # use user profile to determine region as Australia or US
-    region = "US" if user.profile[0].international > 0.5 else "AUS"
+    # use profile to determine region as Australia or US
+    profile = get_profile_from_user(user)
+    region = "US" if profile.international > 0.5 else "AUS"
     body = await get_main_text(portfolio, changes, transactions, user.mailFrequency, region)
-
-    # Step 4: get news articles
-    # article_task = asyncio.create_task(client.get_news_articles(symbols_of_interest))
-
-    # body, articles = await asyncio.gather(body_task,  article_task)
 
     return {
         "body": body,

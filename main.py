@@ -12,12 +12,16 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from data.cron import schedule_jobs
-from advice.single_stock import get_stock_recommendation
-from advice.portfolio import get_recom_transactions
 from crud import get_user_record, insert_advice_record
 from database import SessionLocal
-from helpers import get_portfolio_value, get_stock_by_symbol
+
+from helpers import get_portfolio_from_user, get_profile_from_user, get_portfolio_value, get_stock_by_symbol
+from data.cron import schedule_jobs as schedule_data_jobs
+from mailing.cron import schedule_jobs as schedule_mail_jobs
+from advice.single_stock import get_stock_recommendation
+from advice.portfolio import get_recom_transactions
+from advice.params import OBJECTIVE_MAP
+
 from schemas import GetAdviceByStockRequest, GetRecommendationsRequest
 
 @asynccontextmanager
@@ -27,7 +31,8 @@ async def lifespan(app: FastAPI):
     if os.getenv("ENVIRONMENT") == "production":
         scheduler = AsyncIOScheduler()
         # add jobs to scheduler
-        schedule_jobs(scheduler)
+        schedule_data_jobs(scheduler)
+        schedule_mail_jobs(scheduler)
         # start scheduler
         scheduler.start()
         print("Scheduler started")
@@ -109,7 +114,8 @@ def get_advice(
 
         user = get_user_record(userId, db)
         # get current portfolio value
-        current_value = get_portfolio_value(user.holdings)
+        portfolio = get_portfolio_from_user(user)
+        current_value = get_portfolio_value(portfolio)
         # handle edge case where implied portfolio value is zero or less
         if current_value + amount <= 0:
             if body.action == "review":
@@ -136,7 +142,17 @@ def get_advice(
 
             db.commit()
 
-        return res
+        # add message to help LLM understand function output
+        profile = get_profile_from_user(user)
+        message = (
+            "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[profile.objective]["description"]) +
+            "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
+        )
+
+        return {
+            "message": message,
+            **res,
+        }
 
     except Exception as e:
         traceback.print_exc()

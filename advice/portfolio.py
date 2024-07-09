@@ -1,30 +1,57 @@
 from datetime import datetime, timedelta
+import itertools
 
 import pandas as pd
 import numpy as np
 
 from schemas import User
-from helpers import get_portfolio_value, get_portfolio_as_dataframe
-from .optimiser import Optimiser
-from .params import OBJECTIVE_MAP
+from helpers import get_portfolio_value, get_portfolio_from_user, get_profile_from_user
 
-def get_symbols_to_exclude(user: User):
+from advice.optimiser import Optimiser
+
+def get_symbols_to_include_and_exclude(user: User|None):
     # want to select a random sample of stocks from recent advice records to exclude
     # this will give the impression of generating fresh recommendations
+    include = []
     exclude = []
-    if (len(user.advice) > 0):
+    if user and len(user.advice) > 0:
         now = datetime.now()
         sample_space = []
         for record in user.advice:
             if now - record.createdAt > timedelta(days=1):
                 continue
-            sample_space += [transaction["symbol"] for transaction in record.transactions]
-        if len(sample_space) > 1:
-            exclude = np.random.choice(sample_space, np.random.randint(1, min(len(sample_space), 5)), replace=False)
-        else:
-            exclude = sample_space
+            sample_space += [transaction for transaction in record.transactions]
 
-    return exclude
+        include_sample_space = [transaction["symbol"] for transaction in sample_space if transaction["units"] < 0]
+        if len(include_sample_space) > 1:
+            include = np.random.choice(include_sample_space, np.random.randint(1, min(len(include_sample_space), 5)), replace=False)
+        exclude_sample_space = [transaction["symbol"] for transaction in sample_space if transaction["units"] > 0]
+        if len(exclude_sample_space) > 1:
+            exclude = np.random.choice(exclude_sample_space, np.random.randint(1, min(len(exclude_sample_space), 5)), replace=False)
+        
+    return include, exclude
+
+# Function to find the combination with the combination of transactions with closest sum to zero
+def find_closest_zero_sum_combinations(df, max_rows=5):
+    buys = df[df["delta_value"] > 0]
+    sells = df[df["delta_value"] < 0]
+    combined_df = pd.concat([buys, sells])
+    rows = combined_df.to_dict('records')
+    
+    closest_combo = None
+    closest_sum = float('inf')
+    
+    for r in range(1, max_rows + 1):
+        for combo in itertools.combinations(rows, r):
+            combo_df = pd.DataFrame(combo)
+            current_sum = combo_df['delta_value'].sum()
+            if abs(current_sum) < abs(closest_sum):
+                closest_sum = current_sum
+                closest_combo = combo_df
+                if closest_sum == 0:
+                    return closest_combo
+    
+    return closest_combo
 
 def get_transactions_from_optimal_portfolio(
     current_portfolio: pd.DataFrame|list[dict],
@@ -60,7 +87,20 @@ def get_transactions_from_optimal_portfolio(
 
     if amount == 0:
         # indicates a portfolio review
-        transactions = df.head(max_rows)
+        buys = df[df["delta_value"] > 0]
+        sells = df[df["delta_value"] < 0]
+        if len(sells) > 0:
+            n_sells = np.random.randint(1, min(len(sells), np.floor(max_rows / 2)))
+            # scale up buys until value is approx 0
+            sells = sells.head(n_sells)
+            buys = buys.head(max_rows - n_sells)
+            scaling_factor = abs(sells["delta_value"].sum()) / abs(buys["delta_value"].sum())
+            buys["delta_units"] = np.round(buys["delta_units"] * scaling_factor).astype(int)
+            buys["delta_value"] = buys["delta_value"] * scaling_factor
+            transactions = pd.concat([sells, buys])
+        else:
+            # no sells available
+            transactions = df.head(max_rows)
     else:
         temp = df[np.sign(df["delta_value"]) == np.sign(amount)].head(max_rows)
         temp_sum = temp["delta_value"].sum()
@@ -86,7 +126,6 @@ def get_transactions_from_optimal_portfolio(
             # apply scaling factor to each transaction
             transactions = temp
             scaling_factor = abs(amount) / abs(temp_sum)
-            print(scaling_factor)
             transactions["delta_units"] = np.round(transactions["delta_units"] * scaling_factor).astype(int)
             transactions["delta_value"] = transactions["delta_value"] * scaling_factor
         else:
@@ -111,27 +150,22 @@ def get_transactions_from_optimal_portfolio(
     # convert to records before returning
     return transactions.to_dict(orient='records')
 
-def get_recom_transactions(user: User, amount: float = 0):
-    current_portfolio = get_portfolio_as_dataframe(user)
+def get_recom_transactions(user: User|None, amount: float = 0):
+    current_portfolio = get_portfolio_from_user(user)
+    profile = get_profile_from_user(user)
     current_value = get_portfolio_value(current_portfolio)
     # initialise optimiser
-    optimiser = Optimiser(current_portfolio, user.profile[0], current_value + amount)
+    optimiser = Optimiser(current_portfolio, profile, current_value + amount)
     # get optimal portfolio
-    exclude = get_symbols_to_exclude(user)
-    optimal_portfolio = optimiser.get_optimal_portfolio(exclude=exclude)
+    include, exclude = get_symbols_to_include_and_exclude(user)
+    optimal_portfolio = optimiser.get_optimal_portfolio(include=include, exclude=exclude)
     # get transactions
     transactions = get_transactions_from_optimal_portfolio(current_portfolio, optimal_portfolio, amount)
 
     # get adjusted utility before and after recommended transactions
     initial_adj_utility, final_adj_utility = optimiser.get_utility(current_portfolio), optimiser.get_utility(optimal_portfolio)
-    # message to help LLM understand function output
-    message = (
-        "These transactions are recommended for the user based on their objective - {}. ".format(OBJECTIVE_MAP[user.profile[0].objective if user.profile[0] else "RETIREMENT"]["description"]) +
-        "Transactions are recommended by comparing the user's current portfolio to an optimal portfolio. The utility function is a Treynor ratio that is adjusted for the user's investing preferences."
-    )
 
     return {
-        "message": message,
         "transactions": transactions,
         "initial_adj_utility": initial_adj_utility,
         "final_adj_utility": final_adj_utility

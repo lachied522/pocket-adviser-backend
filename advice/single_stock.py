@@ -3,7 +3,7 @@ import numpy as np
 
 from schemas import User
 from universe import Universe
-from helpers import get_portfolio_as_dataframe
+from helpers import get_portfolio_from_user, get_profile_from_user
 from advice.optimiser import Optimiser
 from advice.params import OBJECTIVE_MAP
 
@@ -24,7 +24,7 @@ def get_sector_allocation(portfolio: pd.DataFrame|list, sector: str):
 
 def get_stock_recommendation(
     stock: dict,
-    user: User,
+    user: User|None,
     amount: float # proposed amount to buy (positive) or sell (negative)
 ):
     """
@@ -36,8 +36,8 @@ def get_stock_recommendation(
         4. Analyst price targets.
         5. Utility of portfolio before and after proposed transaction.
     """
-    # extract objective and set default as retirement
-    objective = user.profile.objective if user.profile else "RETIREMENT"
+    current_portfolio = get_portfolio_from_user(user)
+    profile = get_profile_from_user(user)
     # get proposed number of units by dividing by previousClose
     proposed_units = round(amount / stock["previousClose"])
     # check if existing holding
@@ -49,10 +49,10 @@ def get_stock_recommendation(
     # check whether proposed transaction is within sector allocations
     is_recommended_by_sector_allocation = True
     sector_allocation_message = "The proposed transaction is within the user's recommended sector allocation based on their objective and preferences. "
-    if not stock["sector"] or objective == "TRADING":
+    if not stock["sector"] or profile.objective == "TRADING":
         pass
     else:
-        target_allocation = OBJECTIVE_MAP[objective]["sector_allocations"].get(stock["sector"])
+        target_allocation = OBJECTIVE_MAP[profile.objective]["sector_allocations"].get(stock["sector"])
         current_allocation = get_sector_allocation(user.holdings, stock["sector"])
         proposed_allocation = current_allocation + amount
         if proposed_allocation > target_allocation:
@@ -66,13 +66,13 @@ def get_stock_recommendation(
     # check whether stock is within recommendations for risk as measured by beta
     is_recommended_by_risk = True
     risk_message = "The risk (Beta) of the stock appears to be inline with the user's investment objective."
-    if objective == "TRADING":
+    if profile.objective == "TRADING":
         # trading objective should have no requirements for beta
         pass
     elif not stock["beta"]:
         risk_message = "Risk (Beta) information is not available for this stock. "
     else:
-        target_beta = OBJECTIVE_MAP[objective]["target_beta"]
+        target_beta = OBJECTIVE_MAP[profile.objective]["target_beta"]
         # check whether stock beta is within reasonable distance from target beta
         difference = stock["beta"] - target_beta
         if abs(difference) > 0.50:
@@ -84,12 +84,12 @@ def get_stock_recommendation(
     # check whether stock is within recommendations for income
     is_recommended_by_income = True
     income_message = "The dividend yield of the stock appears to be inline with the user's investment objective. "
-    if objective == "TRADING":
+    if profile.objective == "TRADING":
         pass
     elif not stock["dividendYield"]:
         is_recommended_by_income = "Dividend information is not available for this stock. "
     else:
-        target_yield = OBJECTIVE_MAP[objective]["target_yield"]
+        target_yield = OBJECTIVE_MAP[profile.objective]["target_yield"]
         # check whether stock yield is within reasonable distance from target
         difference = stock["dividendYield"] - target_yield
         if abs(difference) > 0.50:
@@ -116,8 +116,7 @@ def get_stock_recommendation(
 
     # finally, check whether portfolio utility is increased by transaction
     # initialise optimiser
-    current_portfolio = get_portfolio_as_dataframe(user)
-    optimiser = Optimiser(current_portfolio, user.profile[0])
+    optimiser = Optimiser(current_portfolio, profile)
 
     # get initial adjusted utility
     initial_adj_utility = optimiser.get_utility(current_portfolio)
@@ -152,7 +151,7 @@ def get_stock_recommendation(
 
     return {
         "proposed_transaction": f"{'Buy' if amount > 0 else 'Sell'} ${amount:,.2f} in {stock['symbol']}",
-        "user_objective": OBJECTIVE_MAP[objective]["description"],
+        "user_objective": OBJECTIVE_MAP[profile.objective]["description"],
         "is_recommended": is_recommended,
         "message": message,
         "is_recommended_by_sector_allocation": is_recommended_by_sector_allocation,
