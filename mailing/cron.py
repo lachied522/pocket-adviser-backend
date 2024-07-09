@@ -72,7 +72,7 @@ def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         send_all_emails,
         args=["MONTHLY"],
-        trigger=CronTrigger(hour=9, minute=0, day='first'),
+        trigger=CronTrigger(hour=9, minute=0, day=1),
         id="monthly_emails",
         name="Send monthly emails on last day of month at 9am",
         max_instances=1
