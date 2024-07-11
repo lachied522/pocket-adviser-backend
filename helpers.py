@@ -48,7 +48,7 @@ def get_portfolio_from_user(user: User|None):
     return df
 
 def get_profile_from_user(user: User|None):
-    if user:
+    if user and len(user.profile) > 0:
         return user.profile[0]
     # return a default profile
     return Profile(

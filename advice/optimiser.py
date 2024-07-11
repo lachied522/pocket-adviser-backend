@@ -213,7 +213,7 @@ class Optimiser:
         international_cons = []
         target_international = self.profile.international
         if 0 < target_international and target_international < 1:
-            international = np.array(df["exchange"]=="NASDAQ")
+            international = np.array(df["exchange"].isin(["NASDAQ", "NYSE"]))
             international_cons = [LinearConstraint(international, self.target*max(0, target_international), self.target*min(target_international, 1))]
 
         # constrain weight of 'locked' holdings

@@ -14,6 +14,18 @@ from universe import Universe
 from models import Stock
 from database import SessionLocal
 
+EXCHANGES = {
+    "ASX": {
+        "min_cap": 5_000_000_000
+    },
+    "NASDAQ": {
+        "min_cap": 50_000_000_000
+    },
+    "NYSE": {
+        "min_cap": 100_000_000_000
+    }
+}
+
 def commit_changes(upsert_stmts, delete_stmt):
     # initialise db connection
     db = SessionLocal()
@@ -37,73 +49,89 @@ def commit_changes(upsert_stmts, delete_stmt):
 
     print("Error executing statements after three attempts")
 
-async def refresh_stock_data_by_exchange(exchange: str) -> None:
-    if not (exchange == "ASX" or exchange == "NASDAQ"):
-        raise Exception("Exchange must be ASX or NASDAQ")
+async def refresh_stock_data_by_exchange(exchanges: str|list[str]) -> None:
+    if isinstance(exchanges, str):
+        exchanges = [exchanges]
+    
+    for exchange in exchanges:
+        if not exchange in EXCHANGES:
+            raise Exception("Exchange must be one of ", ", ".join(EXCHANGES.keys()))
 
-    try:
-        print("Updating data for exchange: ", exchange)
-        # fetch all symbols for exchange
-        stocks = await ApiClient().get_all_stocks_by_exchange(exchange)
-        # keep track of updated symbols
-        updated = []
-        errored = []
-        to_upsert = []
-        max_calls = 100
-        delay_per_call = 60 / max_calls
-        # initialise a min_wait task
-        min_wait = asyncio.create_task(asyncio.sleep(0))
-        for quote in stocks:
-            try:
-                min_cap = 50_000_000_000 if exchange == "NASDAQ" else 5_000_000_000
-                if quote['marketCap'] is None or quote['marketCap'] < min_cap:
-                    continue
+        try:
+            print("Updating data for exchange: ", exchange)
+            # fetch all symbols for exchange
+            stocks = await ApiClient().get_all_stocks_by_exchange(exchange)
+            # some stocks have more than one listing on the same exchange, e.g. BAC
+            # we will keep track of names that have been updated
+            # the primary listing will always be first alphabetically
+            updated = {
+                "symbols": [],
+                "names": [],
+            }
+            errored = [] # symbols of errored stocks
+            to_upsert = []
+            # financial modelling prep is rate limited to 300 calls/min
+            # we will limit to 150 to allow room calls elsewhere
+            max_calls = 150
+            delay_per_call = 60 / max_calls
+            # initialise a min_wait task
+            min_wait = asyncio.create_task(asyncio.sleep(0))
+            for quote in stocks:
+                try:
+                    if quote['marketCap'] is None or quote['marketCap'] < EXCHANGES[exchange]['min_cap']:
+                        continue
 
-                # wait for min_wait
-                await min_wait
-                # fetch data
-                data = await get_aggregated_stock_data(quote['symbol'], exchange, quote)
-                # create a new min_wait task
-                min_wait = asyncio.create_task(asyncio.sleep(delay_per_call))
-                if data:
-                    # append data to upsert array
-                    to_upsert.append(data)
-                    # append symbol to updated array
-                    updated.append(quote['symbol'])
-                    print(f"Retreived data for {quote['symbol']}", end="\r")
+                    # check that name does not already exist in updated list
+                    if quote['name'] in updated['names']:
+                        continue
 
-            except Exception as e:
-                errored.append(quote['symbol'])
-                print(f"Could not refresh data for {quote['symbol']}: ", str(e))
+                    # wait for min_wait
+                    await min_wait
+                    # fetch data
+                    data = await get_aggregated_stock_data(quote['symbol'], exchange, quote)
+                    # create a new min_wait task
+                    min_wait = asyncio.create_task(asyncio.sleep(delay_per_call))
+                    if data:
+                        # append data to upsert array
+                        to_upsert.append(data)
+                        # append symbol to updated array
+                        updated["symbols"].append(quote['symbol'])
+                        updated["names"].append(quote['name'])
+                        print(f"Retreived data for {quote['symbol']}", end="\r")
 
-        # upsert statement for updated symbols
-        insert_stmts = insert(Stock).values(to_upsert)
-        upsert_stmts = insert_stmts.on_conflict_do_update(
-            index_elements=['symbol'],
-            set_={c.key: c for c in insert_stmts.excluded}
-        )
+                except Exception as e:
+                    errored.append(quote['symbol'])
+                    print(f"Could not refresh data for {quote['symbol']}: ", str(e))
 
-        # delete all symbols that were not updated
-        delete_stmt = delete(Stock).where(
-            and_(
-                ~Stock.symbol.in_(updated),
-                Stock.exchange == exchange
+            # upsert statement for updated symbols
+            insert_stmts = insert(Stock).values(to_upsert)
+            upsert_stmts = insert_stmts.on_conflict_do_update(
+                index_elements=['symbol'],
+                set_={c.key: c for c in insert_stmts.excluded}
             )
-        )
-        
-        commit_changes(upsert_stmts, delete_stmt)
-        # revalidate universe
-        Universe().revalidate()
-        print("Data updated for symbols", ",".join(updated))
-        print("Update errored for symbols", ",".join(errored))
-    except Exception as e:
-        traceback.print_exc()
-        print(f"Error refreshing data for exchange {exchange}: {str(e)}")
+
+            # delete all symbols that were not updated
+            delete_stmt = delete(Stock).where(
+                and_(
+                    ~Stock.symbol.in_(updated['symbols']),
+                    Stock.exchange == exchange
+                )
+            )
+            
+            commit_changes(upsert_stmts, delete_stmt)
+            # revalidate universe
+            Universe().revalidate()
+            print("Data updated for symbols", ",".join(updated['symbols']))
+            if len(errored) > 0:
+                print("Update errored for symbols", ",".join(errored))
+        except Exception as e:
+            traceback.print_exc()
+            print(f"Error refreshing data for exchange {exchange}: {str(e)}")
 
 def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         refresh_stock_data_by_exchange,
-        args=["ASX"],
+        args=[["ASX"]],
         trigger=CronTrigger(hour=18, minute=0, day_of_week='mon-fri'),
         id="refresh_asx",
         name="Refresh ASX data at 6pm AEST",
@@ -112,7 +140,7 @@ def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
 
     scheduler.add_job(
         refresh_stock_data_by_exchange,
-        args=["NASDAQ"],
+        args=[["NYSE", "NASDAQ"]],
         trigger=CronTrigger(hour=8, minute=0, day_of_week='tue-sat'),
         id="refresh_nasdaq",
         name="Refresh NASDAQ data at 8am AEST",
