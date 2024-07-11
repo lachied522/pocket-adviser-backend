@@ -1,14 +1,10 @@
-import os
 import traceback
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from contextlib import asynccontextmanager
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -16,37 +12,21 @@ from crud import get_user_record, insert_advice_record
 from database import SessionLocal
 
 from helpers import get_portfolio_from_user, get_profile_from_user, get_portfolio_value, get_stock_by_symbol
-from data.cron import schedule_jobs as schedule_data_jobs
-from mailing.cron import schedule_jobs as schedule_mail_jobs
+from data.jobs import refresh_data_by_exchange
+from mailing.jobs import send_emails_by_frequency
 from advice.single_stock import get_stock_recommendation
 from advice.portfolio import get_recom_transactions
 from advice.params import OBJECTIVE_MAP
 
 from schemas import GetAdviceByStockRequest, GetRecommendationsRequest
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("App running")
-
-    if os.getenv("ENVIRONMENT") == "production":
-        scheduler = AsyncIOScheduler()
-        # add jobs to scheduler
-        schedule_data_jobs(scheduler)
-        schedule_mail_jobs(scheduler)
-        # start scheduler
-        scheduler.start()
-        print("Scheduler started")
-
-    yield
-    print("App Shutdown")
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://www.pocketadviser.com.au", "http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -56,6 +36,36 @@ def get_db():
         yield db
     finally:
         db.close()
+
+@app.get("/refresh-data")
+async def refresh_data(
+    exchange: str,
+    background_tasks: BackgroundTasks
+):
+    # add job to background tasks
+    background_tasks.add_task(refresh_data_by_exchange, [s.upper() for s in exchange.split(',')])
+    return {
+        "message": "Refresh job queued."
+    }
+
+@app.get("/send-emails")
+async def send_emails(
+    response: Response,
+    frequency: str,
+    background_tasks: BackgroundTasks
+):
+    if frequency.lower() not in ["daily", "weekly", "monthly"]:
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return {
+            "message": "Frequency must be one of daily, weekly, or monthly."
+        }
+    
+    # add job to background tasks
+    background_tasks.add_task(send_emails_by_frequency, frequency.upper())
+    return {
+        "message": "Refresh job queued."
+    }
+
 
 @app.post("/get-advice-by-stock")
 async def get_advice_by_stock(

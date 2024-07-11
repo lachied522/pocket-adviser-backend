@@ -7,15 +7,21 @@ from helpers import get_portfolio_from_user, get_profile_from_user
 from advice.optimiser import Optimiser
 from advice.params import OBJECTIVE_MAP
 
+def get_existing_holding(portfolio: pd.DataFrame, stockId: str):
+    """
+    Get the user's existing holding for stock. If it doesn't exist, return None.
+    """
+    for _, holding in portfolio.iterrows():
+        if holding["stockId"] == stockId:
+            return holding.to_dict()
+    return None
+
 def get_sector_allocation(portfolio: pd.DataFrame|list, sector: str):
     """
     Get current sector allocation for a portfolio.
     """
     value = 0
-    if type(portfolio) == pd.DataFrame:
-        portfolio = portfolio.to_dict(orient='records')
-
-    for holding in portfolio:
+    for _, holding in portfolio.iterrows():
         stock = Universe().get_stock_by_id(holding["stockId"])
         if stock and stock["sector"] == sector:
             value += holding["units"] * stock["previousClose"]
@@ -41,7 +47,10 @@ def get_stock_recommendation(
     # get proposed number of units by dividing by previousClose
     proposed_units = round(amount / stock["previousClose"])
     # check if existing holding
-    existing_holding = [holding for holding in user.holdings if holding.stockId == stock["id"]][0] if "id" in stock else None
+    existing_holding = None
+    if "id" in stock:
+        existing_holding = get_existing_holding(current_portfolio, stock["id"])
+    
     # edge case where user wishes to sell stock not in portfolio
     if proposed_units < 0 and existing_holding is None:
         raise Exception("User does not hold {}".format(stock["symbol"]))
@@ -53,7 +62,7 @@ def get_stock_recommendation(
         pass
     else:
         target_allocation = OBJECTIVE_MAP[profile.objective]["sector_allocations"].get(stock["sector"])
-        current_allocation = get_sector_allocation(user.holdings, stock["sector"])
+        current_allocation = get_sector_allocation(current_portfolio, stock["sector"])
         proposed_allocation = current_allocation + amount
         if proposed_allocation > target_allocation:
             # proposed transaction is within sector allocations
@@ -70,7 +79,7 @@ def get_stock_recommendation(
         # trading objective should have no requirements for beta
         pass
     elif not stock["beta"]:
-        risk_message = "Risk (Beta) information is not available for this stock. "
+        risk_message = "Risk (Beta) information is not available for this stock."
     else:
         target_beta = OBJECTIVE_MAP[profile.objective]["target_beta"]
         # check whether stock beta is within reasonable distance from target beta
@@ -87,7 +96,7 @@ def get_stock_recommendation(
     if profile.objective == "TRADING":
         pass
     elif not stock["dividendYield"]:
-        is_recommended_by_income = "Dividend information is not available for this stock. "
+        is_recommended_by_income = "Dividend information is not available for this stock."
     else:
         target_yield = OBJECTIVE_MAP[profile.objective]["target_yield"]
         # check whether stock yield is within reasonable distance from target

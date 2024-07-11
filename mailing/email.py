@@ -42,3 +42,20 @@ def send_email(
         mailer.send(mail_body)
     except Exception as e:
         print("Could not send email: ", str(e))
+
+def send_bulk_email(mail_list: list[dict]):
+    # see https://github.com/mailersend/mailersend-python?tab=readme-ov-file#send-bulk-email
+    try:
+        for mail in mail_list:
+            # populate missing fields
+            if "from" not in mail:
+                mail["from"] = {
+                    "name": "Pocket Adviser",
+                    "email": "newsletter@pocketadviser.com.au",
+                }
+            if "text" not in mail:
+                mail["text"] = PLAIN_TEXT_DEFAULT
+
+        mailer.send_bulk(mail_list)
+    except Exception as e:
+        print("Could not send bulk email: ", str(e))

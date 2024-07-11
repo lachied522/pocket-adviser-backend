@@ -5,9 +5,6 @@ import asyncio
 from sqlalchemy import delete, and_
 from sqlalchemy.dialects.postgresql import insert
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-
 from data.helpers import get_aggregated_stock_data
 from data.financial_modelling_prep import ApiClient
 from universe import Universe
@@ -49,7 +46,7 @@ def commit_changes(upsert_stmts, delete_stmt):
 
     print("Error executing statements after three attempts")
 
-async def refresh_stock_data_by_exchange(exchanges: str|list[str]) -> None:
+async def refresh_data_by_exchange(exchanges: str|list[str]) -> None:
     if isinstance(exchanges, str):
         exchanges = [exchanges]
     
@@ -97,7 +94,7 @@ async def refresh_stock_data_by_exchange(exchanges: str|list[str]) -> None:
                         # append symbol to updated array
                         updated["symbols"].append(quote['symbol'])
                         updated["names"].append(quote['name'])
-                        print(f"Retreived data for {quote['symbol']}", end="\r")
+                        # print(f"Retreived data for {quote['symbol']}", end="\r")
 
                 except Exception as e:
                     errored.append(quote['symbol'])
@@ -127,22 +124,3 @@ async def refresh_stock_data_by_exchange(exchanges: str|list[str]) -> None:
         except Exception as e:
             traceback.print_exc()
             print(f"Error refreshing data for exchange {exchange}: {str(e)}")
-
-def schedule_jobs(scheduler: AsyncIOScheduler) -> None:
-    scheduler.add_job(
-        refresh_stock_data_by_exchange,
-        args=[["ASX"]],
-        trigger=CronTrigger(hour=18, minute=0, day_of_week='mon-fri'),
-        id="refresh_asx",
-        name="Refresh ASX data at 6pm AEST",
-        max_instances=1
-    )
-
-    scheduler.add_job(
-        refresh_stock_data_by_exchange,
-        args=[["NYSE", "NASDAQ"]],
-        trigger=CronTrigger(hour=8, minute=0, day_of_week='tue-sat'),
-        id="refresh_nasdaq",
-        name="Refresh NASDAQ data at 8am AEST",
-        max_instances=1
-    )

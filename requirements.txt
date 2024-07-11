@@ -4,11 +4,11 @@ pydantic
 sqlalchemy
 psycopg2-binary
 python-dotenv
+upstash-redis
 pandas
 numpy
 scipy
 aiohttp
-APScheduler
 yfinance
 openai
 mailersend

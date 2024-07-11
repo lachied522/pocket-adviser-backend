@@ -1,6 +1,3 @@
-from datetime import datetime
-import json
-
 import asyncio
 import pandas as pd
 
@@ -12,7 +9,7 @@ from universe import Universe
 from helpers import get_portfolio_from_user, get_profile_from_user
 
 from ai.functions import openai_call
-from ai.search import search_web
+from ai.helpers import get_general_market_update, get_stock_update_by_symbol
 from advice.portfolio import get_recom_transactions
 from data.financial_modelling_prep import ApiClient
 
@@ -24,41 +21,6 @@ freq_map = {
     "MONTHLY": "1M"
 }
 
-query_map = {
-    "DAILY": [
-        "What's happening in the stock market{region}{date}?",
-        "What factors are influencing the stock market{region}{date}?"
-    ],
-    "WEEKLY": [
-        "What's happening in the stock market this week{region}{date}?",
-        "What are investors thinking about this week{region}{date}?",
-    ],
-    "MONTHLY": [
-        "What happened in the stock market last month{region}{date}?",
-        "What is the stock market outlook{region}{date}?",
-    ]
-}
-
-SYSTEM_MESSAGE = (
-    "You are an enthusiastic investment advisor. You are assiting the user with their investments in the stock market. " +
-    "Feel free to use emojis in your messages. "
-)
-
-def get_general_search_queries(freq: str = "DAILY", region: str = "US"):
-    if freq == "MONTHLY":
-        date = datetime.now().strftime('%B %Y')
-    else:
-        date = datetime.now().strftime('%#d %B %Y')
-
-    queries = []
-    for query in query_map[freq]:
-        queries.append(query.format(**{
-            "region": " in Australia" if region == "AUS" else "",
-            "date": " " + date
-        }))
-
-    return queries
-
 async def get_main_text(
         portfolio: pd.DataFrame,
         change_map: dict,
@@ -66,12 +28,12 @@ async def get_main_text(
         freq: str = "DAILY",
         region: str = "US"
     ):
-    # search web for general market news
+    # initialise tasks list
     tasks = []
-    for query in get_general_search_queries(freq, region):
-        tasks.append(
-            asyncio.create_task(search_web(query))
-        )
+    # append general market update
+    tasks.append(
+        asyncio.create_task(get_general_market_update(region))
+    )
     
     # get a subset of symbols for AI to talk about
     # we want a mix of stocks from the user's portfolio and the recommended transactions
@@ -85,49 +47,27 @@ async def get_main_text(
 
     for symbol in symbols_of_interest:
         tasks.append(
-            asyncio.create_task(search_web("What's happening with {} stock?".format(symbol)))
+            asyncio.create_task(get_stock_update_by_symbol(symbol))
         )
 
-    # initialise message
+    sections = await asyncio.gather(*tasks)
+
+    system = "You are an enthusiastic investment adviser. Feel free to use emojis."
+    
     content = (
-        "Give the user a detailed update on the general stock market. Include a paragraph about what factors are influencing the stock market. " + 
-        "Below is some information from the web about the general market and some stocks the user might be interested in. " +
-        "Reference these sources in your response.\n\n" +
-        "Do not provide any recommendations.\n\n"
+        "Use the below information to write a comprehensive article about the stock market. " +
+        "The article should be split into sections General Market Update and Stocks You Might Be Interested In. " +
+        "Consider how the general market will the stocks mentioned." +
+        "\n'''\n" + # helps to separate info from above instruction
+        "\n\n".join(sections)
     )
 
-    # add portfolio to context    
-    content += "Market news:\n\n"
-    # add results of web search to context
-    for result in await asyncio.gather(*tasks):
-        content += json.dumps(result)
-        content += "\n\n"
-
-    # add some basic stock info
-    content += "Stock info:\n\n{}\n\n"
-    for symbol in symbols_of_interest:
-        stock = Universe().get_stock_by_symbol(symbol)
-        content += json.dumps({
-            "symbol": stock["symbol"],
-            "name": stock["name"],
-            "price": stock["previousClose"],
-            f"{freq.lower()}_change": change_map[symbol] if symbol in change_map else "N/A"
-        })
-
-    # content += "\n\nUser's portfolio:\n\n{}".format(
-    #     json.dumps({
-    #         "current_value": (portfolio["units"] * portfolio["previousClose"]).sum(),
-    #         "total_change": change_map["total"],
-    #         "holdings": portfolio[["symbol", "name", "units"]].to_dict(orient="records")
-    #     })
-    # )
-    
     messages = [
-        {"role": "system", "content": SYSTEM_MESSAGE},
-        {"role": "user", "content": content}
+        {"role":"system", "content": system},
+        {"role":"user", "content": content}
     ]
 
-    return openai_call(messages)
+    return await openai_call(messages)
 
 async def calculate_portfolio_changes(
     portfolio: pd.DataFrame,
@@ -201,7 +141,7 @@ async def get_content(user: User):
 
 async def construct_html_body_for_email(
     user: User,
-    file_path: str = 'output.html',
+    file_path: str = 'temp/output.html',
 ):
     # Step 1: get contents
     content = await get_content(user)
