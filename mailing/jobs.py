@@ -52,40 +52,45 @@ def send_queued_emails(users: list[User], subject: str):
     for file_name in to_remove:
         os.remove(file_name)
 
-async def send_emails_by_frequency(freq: str):
-    try:
-        print("Sending {} emails".format(freq.lower()))
-        # Create the directory if it doesn't exist
-        os.makedirs(DIRECTORY, exist_ok=True)
-        # get users
-        users = get_users_by_email_frequency(freq)
-        # define email subject - same for each user
-        subject = "Market Update {}".format(datetime.now().strftime('%#d %B %Y'))
-        # queue emails, send when length is 10
-        queue = []
-        for user in users:
-            try:
-                if not user.email:
-                    # this shouldn't happen since all paid users require an email
-                    raise Exception("User missing email")
+async def send_emails_by_frequency(frequencies: str|list[str]):
+    if isinstance(frequencies, str):
+        frequencies = [frequencies]
 
-                # add file to html content to temp folder
-                file_path = f"{DIRECTORY}/{user.id}.html"
-                await construct_html_body_for_email(user, file_path=file_path)
-                # append user to email queue
-                queue.append(user)
-                # check if length queue > 10
-                if len(queue) > 10:
-                    # send queued emails
-                    send_queued_emails(queue, subject)
-                    # reset queue
-                    queue = []
+    # Create the directory if it doesn't exist
+    os.makedirs(DIRECTORY, exist_ok=True)
+    # initiliase email subject - same for each user
+    subject = "Market Update {}".format(datetime.now().strftime('%#d %B %Y'))
 
-            except Exception as e:
-                print(f"Could not construct email for {user.id}: ", str(e))
+    for freq in frequencies:
+        try:
+            print("Sending {} emails".format(freq.lower()))
+            # get users
+            users = get_users_by_email_frequency(freq)
+            # queue emails, send when length is 10
+            queue = []
+            for user in users:
+                try:
+                    if not user.email:
+                        # this shouldn't happen since all paid users require an email
+                        raise Exception("User missing email")
 
-        # send any remaining emails
-        send_queued_emails(queue, subject)
-        print("Finished sending {} emails".format(freq.lower()))
-    except Exception as e:
-        traceback.print_exc()
+                    # add file to html content to temp folder
+                    file_path = f"{DIRECTORY}/{user.id}.html"
+                    await construct_html_body_for_email(user, file_path=file_path)
+                    # append user to email queue
+                    queue.append(user)
+                    # check if length queue > 10
+                    if len(queue) > 10:
+                        # send queued emails
+                        send_queued_emails(queue, subject)
+                        # reset queue
+                        queue = []
+
+                except Exception as e:
+                    print(f"Could not construct email for {user.id}: ", str(e))
+
+            # send any remaining emails
+            send_queued_emails(queue, subject)
+            print("Finished sending {} emails".format(freq.lower()))
+        except Exception as e:
+            traceback.print_exc()

@@ -38,7 +38,7 @@ def get_db():
         db.close()
 
 @app.get("/refresh-data")
-async def refresh_data(
+def refresh_data(
     exchange: str,
     background_tasks: BackgroundTasks
 ):
@@ -49,23 +49,15 @@ async def refresh_data(
     }
 
 @app.get("/send-emails")
-async def send_emails(
-    response: Response,
+def send_emails(
     frequency: str,
     background_tasks: BackgroundTasks
 ):
-    if frequency.lower() not in ["daily", "weekly", "monthly"]:
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {
-            "message": "Frequency must be one of daily, weekly, or monthly."
-        }
-    
     # add job to background tasks
-    background_tasks.add_task(send_emails_by_frequency, frequency.upper())
+    background_tasks.add_task(send_emails_by_frequency, [s.upper() for s in frequency.split(',')])
     return {
-        "message": "Refresh job queued."
+        "message": "Email job queued."
     }
-
 
 @app.post("/get-advice-by-stock")
 async def get_advice_by_stock(
