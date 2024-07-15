@@ -26,6 +26,7 @@ def get_profile_by_user_id(userId: str, db: Session):
     # fetch all holding records
     return db.query(models.Profile).filter(models.Profile.userId == userId).first()
 
-def insert_advice_record(data: dict, db: Session):
-    stmt = insert(models.Advice).values(**data)
-    db.execute(stmt)
+def insert_advice_record(data: dict, db: Session) -> int:
+    stmt = insert(models.Advice).returning(models.Advice.id).values(**data)
+    # return id of inserted record
+    return db.execute(stmt).fetchone()[0]

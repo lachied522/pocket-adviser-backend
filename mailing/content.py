@@ -1,7 +1,6 @@
 import asyncio
 import pandas as pd
 
-from jinja2 import Environment, FileSystemLoader
 from markdown import markdown
 
 from schemas import User, Holding
@@ -109,7 +108,7 @@ async def calculate_portfolio_changes(
 def format_transactions(transactions: list[dict]):
     # format transactions
     for transaction in transactions:
-        transaction["transaction"] = "Buy" if transaction["units"] > 0 else "Sell"
+        transaction["transaction"] = "📈 Buy" if transaction["units"] > 0 else "📉 Sell"
         transaction["value"] = "$  {:,.2f}".format(transaction["price"] * transaction["units"])
         transaction["price"] = "$  {:,.2f}".format(transaction["price"])
 
@@ -125,35 +124,17 @@ async def get_content(user: User):
 
     # Step 2: get recommended transactions
     # want to get
-    transactions = get_recom_transactions(user)["transactions"]
+    advice = get_recom_transactions(user)
 
     # Step 3: get market update
     # use profile to determine region as Australia or US
     profile = get_profile_from_user(user)
     region = "US" if profile.international > 0.5 else "AUS"
-    body = await get_main_text(portfolio, changes, transactions, user.mailFrequency, region)
+    body = await get_main_text(portfolio, changes, advice["transactions"], user.mailFrequency, region)
 
     return {
-        "body": body,
-        "transactions": format_transactions(transactions),
+        "body": markdown(body), # convert markdown to html
+        "formatted_transactions": format_transactions(advice["transactions"]),
+        "advice": advice,
         # "articles": articles
     }
-
-async def construct_html_body_for_email(
-    user: User,
-    file_path: str = 'temp/output.html',
-):
-    # Step 1: get contents
-    content = await get_content(user)
-    # Step 1.5: convert body text to markdown
-    content["body"] = markdown(content["body"])
-    # Step 2: load template
-    env = Environment(loader=FileSystemLoader('./mailing'))
-    template = env.get_template('template.html')
-    # Step 3: render template
-    html_output = template.render(name=user.name, freq=user.mailFrequency.lower(), **content)
-    # Step 4: write to output file
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(html_output)
-
-    return file_path

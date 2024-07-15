@@ -49,6 +49,8 @@ class Advice(BaseModel):
     action: str
     amount: float
     transactions: List[dict]
+    initialAdjUtility: float
+    finalAdjUtility: float
     createdAt: str
 
     class Config:

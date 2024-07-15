@@ -26,11 +26,13 @@ class Profile(Base):
 
 class Advice(Base):
     __tablename__ = 'Advice'
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     action = Column(String)
     amount = Column(Float)
     transactions = Column(ARRAY(JSON))
-    createdAt = Column(DateTime)
+    initialAdjUtility = Column(Float, nullable=True)
+    finalAdjUtility = Column(Float, nullable=True)
+    createdAt = Column(DateTime, nullable=True)
     userId = Column(String, ForeignKey('User.id'))
 
 class Stock(Base):

@@ -9,6 +9,9 @@
                 margin-right: auto;
                 margin-left: auto;
             }
+            p {
+                font-size: 16px;
+            }
             .main-text {
                 white-space: pre-wrap;
             }
@@ -59,7 +62,7 @@
             Please double-check important information and contact a financial adviser if you require advice. 
             Otherwise, happy investing!
         </p>
-        <h3>Trade Ideas</h3>
+        <h1>Trade Ideas</h1>
         {% if transactions|length < 1 %}
         <div class="empty-message">No trade ideas were generated</div>
         {% else %}
@@ -88,7 +91,7 @@
                 {% endfor %}
             </tbody>
         </table>
-        <p>Chat about these at <a href="https://www.pocketadviser.com.au" target="_blank" class="hyperlink">pocketadviser.com.au</a></p>
+        <p>Get more details at <a href="https://www.pocketadviser.com.au?adviceId={{ adviceId }}" target="_blank" class="hyperlink">pocketadviser.com.au</a></p>
         {% endif %}
         <p class="main-text">
             {{ body }}

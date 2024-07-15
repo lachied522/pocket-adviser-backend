@@ -140,6 +140,8 @@ def get_advice(
                 "action": body.action.upper(),
                 "amount": body.amount,
                 "transactions": res["transactions"],
+                "initialAdjUtility": res["initial_adj_utility"],
+                "finalAdjUtility": res["final_adj_utility"],
             }, db)
 
             db.commit()
