@@ -167,6 +167,6 @@ def get_recom_transactions(user: User|None, amount: float = 0) -> dict:
 
     return {
         "transactions": transactions,
-        "initial_adj_utility": initial_adj_utility,
-        "final_adj_utility": final_adj_utility
+        "initial_adj_utility": float(initial_adj_utility), # ensure float type
+        "final_adj_utility": float(final_adj_utility)
     }

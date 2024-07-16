@@ -106,14 +106,21 @@ def get_advice(
     """
     Provides a list of recommended transactions based on user's objective and preferences.
     """
-    try:
-        if body.action == "deposit":
+    
+    match body.action.lower():
+        case "deposit":
             amount = abs(body.amount)
-        elif body.action == "withdraw":
+        case "withdraw":
             amount = -abs(body.amount)
-        else:
+        case "review":
             amount = 0
+        case _:
+            response.status_code = status.HTTP_400_BAD_REQUEST
+            return {
+                "Action must be one of 'deposit', 'withdraw', 'review'."
+            }
 
+    try:
         user = get_user_record(userId, db)
         # get current portfolio value
         portfolio = get_portfolio_from_user(user)

@@ -1,5 +1,3 @@
-from typing import Any, List, Tuple
-
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, Bounds, LinearConstraint
@@ -43,7 +41,7 @@ class Optimiser:
             self,
             a: np.ndarray|pd.Series,
             df: pd.DataFrame,
-            additional_factors: List[np.ndarray] = [],
+            additional_factors: list[np.ndarray] = [],
             a0: np.ndarray|pd.Series|None = None,
             include_penalty: bool = True
         ):
@@ -74,14 +72,14 @@ class Optimiser:
             # multiplication by 2 represents consideration for fees incurred both by a 'buy' and 'sell' transaction
             penalty = 2 * penalty / self.target
         return -(U-penalty)
-    
+
     def optimise(
         self,
         df: pd.DataFrame,
         additional_factors: list = [],
         a0: np.ndarray|list = [],
         bnds: Bounds = Bounds(0, 1, keep_feasible=True),
-        cons: Tuple[list] = tuple(),
+        cons: tuple[list] = tuple(),
         include_penalty: bool = True,
         method: str = "SLSQP",
         maxiter: int = 200
@@ -95,8 +93,8 @@ class Optimiser:
     def apply_filters(
         self,
         df: pd.DataFrame,
-        exclude: List[str] = [],
-        include: List[str] = [],
+        exclude: list[str] = [], # array of symbols to exclude from optimal portfolio
+        include: list[str] = [], # array of symbols to include in optimal portfolio
         N: int = 50 # target size of resulting dataframe
     ):
         """
@@ -141,7 +139,7 @@ class Optimiser:
                 # upper_peg = group["PEG"].median()
 
                 sub = group[
-                    # (group["symbol"].isin(include)) # keep stocks in include array
+                    (group["symbol"].isin(include)) | # keep stocks in include array
                     (group["units"] > 0) | # keep stocks that are already in the portfolio
                     (
                         (group["expReturn"] > lower_exp_return) &
@@ -187,13 +185,27 @@ class Optimiser:
 
         return targets
 
-    def get_constraints(self, df: pd.DataFrame):
+    def get_constraints(
+        self,
+        df: pd.DataFrame,
+        fixed: list[str] = [] # array of symbols with fixed units
+    ):
         """
         Linear constraints of lb < A.x < ub. Returns tuple.
         """
         # weights must sum to one, within error
         lb, ub = self.target * (1-self.error), self.target * (1+self.error)
         sum_cons = [LinearConstraint(np.ones(len(df)), lb, ub)]
+
+        # constrain weight of 'fixed' holdings
+        fixed_cons = []
+        # avoid edge case where value of 'fixed' holdings is greater than target value
+        fixed = df[df['symbol'].isin(fixed)]
+        if self.target > np.sum(fixed['units'].fillna(0) * fixed['previousClose']):
+            for _, row in fixed.iterrows():
+                stock_vector = np.array(df['symbol']==row['symbol'])
+                # set inequality constraint with current value as lower bound
+                fixed_cons.append(LinearConstraint(stock_vector, row['previousClose'] * row['units']))
 
         # yield constraint
         yield_cons = []
@@ -216,16 +228,6 @@ class Optimiser:
             international = np.array(df["exchange"].isin(["NASDAQ", "NYSE"]))
             international_cons = [LinearConstraint(international, self.target*max(0, target_international), self.target*min(target_international, 1))]
 
-        # constrain weight of 'locked' holdings
-        # locked_cons = []
-        # # avoid edge case where value of 'locked' holdings is greater than target value
-        # locked = wp[wp['locked']==True]
-        # if value > np.sum(locked['units'].fillna(0) * locked['last_price']):
-        #     for _, row in locked.iterrows():
-        #         stock_vector = np.array(wp['symbol']==row['symbol'])
-        #         # set inequality constraint with target value as upper limit
-        #         locked_cons.append(LinearConstraint(stock_vector, row['last_price'] * row['units'], value))
-
         # sector constraints
         sector_cons = []
         sector_allocation_map = self.get_sector_allocations()
@@ -234,16 +236,14 @@ class Optimiser:
             target_sectors = list(sector_allocation_map.items())[:-1]
 
             # target sector allocations must be adjusted for locked holdings
-            # if wp['locked'].any():
-            #     locked = wp[wp['locked']==True]
-            #     s = 1 # scaling factor for adjusting un-'locked' sectors by
-            #     for i, (sector, target) in enumerate(target_sectors):
-            #         # check if locked allocation is greater than target allocation
-            #         locked_allocation = np.sum([s['units'] * s['last_price'] for _, s in locked[locked['sector']==sector].iterrows()])
-            #         if locked_allocation >= value*sector_allocation_map[sector]:
-            #             # target allocation is already met, remove sector from target allocations
-            #             target_sectors.remove(target_sectors[i])
-            #             s -= locked_allocation / value
+            # s = 1 # scaling factor for adjusting un-'locked' sectors
+            # for i, (sector, target) in enumerate(target_sectors):
+            #     # check if locked allocation is greater than target allocation
+            #     locked_allocation = np.sum([s['units'] * s['last_price'] for _, s in locked[locked['sector']==sector].iterrows()])
+            #     if locked_allocation >= value*sector_allocation_map[sector]:
+            #         # target allocation is already met, remove sector from target allocations
+            #         target_sectors.remove(target_sectors[i])
+            #         s -= locked_allocation / value
 
             #     # adjust target allocations of remaining sectors
             #     sector_allocation_map = {k: v * s for k, v in sector_allocation_map.items()}
@@ -256,13 +256,13 @@ class Optimiser:
 
         return tuple(
             sum_cons +
+            fixed_cons +
             yield_cons +
             passive_cons +
             sector_cons +
             international_cons
-            # locked_cons
         )
-    
+
     def get_bounds(self, df: pd.DataFrame) -> Bounds:
         # lower bound equal to zero (no shorts)
         lb = np.zeros(len(df))
@@ -296,7 +296,11 @@ class Optimiser:
 
         return additional_factors
 
-    def get_optimal_portfolio(self, exclude: List[str] = [], include: List[str] = []):
+    def get_optimal_portfolio(
+        self, 
+        exclude: list[str] = [], # array of symbols to exclude from optimal portfolio
+        include: list[str] = [], # array of symbols to include in optimal portfolio
+    ):
         # get a working copy of the portfolio
         df = Universe().merge_with_portfolio(self.portfolio)
 
@@ -306,8 +310,8 @@ class Optimiser:
         # get bounds
         bnds = self.get_bounds(df)
 
-        # get constraints
-        cons = self.get_constraints(df)
+        # get constraints, and ensure symbols in 'include' array are fixed
+        cons = self.get_constraints(df, fixed=include)
 
         # get additional factors
         additional_factors = self.get_additional_factors(df)
