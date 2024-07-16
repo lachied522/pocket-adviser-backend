@@ -1,21 +1,42 @@
 import os
 from datetime import datetime
 
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
-from psycopg2 import OperationalError
+from psycopg2 import OperationalError, InternalError
 from jinja2 import Environment, FileSystemLoader
 
 from database import SessionLocal
-from crud import insert_advice_record
-from models import User
+from models import User, Advice
 
 from mailing.content import get_content
 from mailing.email import send_bulk_email
 
 DIRECTORY = "temp"
 
-def get_users_by_email_frequency(freq: str, db: Session) -> list[User]:
-    return db.query(User).filter(User.mailFrequency == freq).all()
+def run_query_with_retries(stmt, db: Session, max_attempts: int = 3):
+    attempts = 0
+    while attempts < max_attempts:
+        try:
+            return db.execute(stmt)
+        except Exception as e:
+            attempts += 1
+            if type(e) == OperationalError or type(e) == InternalError:
+                db.rollback()
+    
+    print("Error executing statements after three attempts")
+
+def get_users_by_frequency(freq: str, db: Session) -> list[User]:
+    stmt = select(User).where(User.mailFrequency == freq)
+    result = run_query_with_retries(stmt, db)
+    return result.unique().scalars().all()
+
+def insert_advice_record(data: dict, db: Session) -> int:
+    stmt = insert(Advice).returning(Advice.id).values(**data)
+    result = run_query_with_retries(stmt, db)
+    # return id of inserted record
+    return result.fetchone()[0]
 
 def send_queued_emails(users: list[User], subject: str):
     # emails are sent in bulk to reduce API usage
@@ -70,7 +91,7 @@ async def send_emails_by_frequency(frequencies: str|list[str]):
     for freq in frequencies:
         print("Sending {} emails".format(freq.lower()))
         # get users
-        users = get_users_by_email_frequency(freq, db)
+        users = get_users_by_frequency(freq, db)
         # queue emails, send when length is 10
         queue = []
         for user in users:
@@ -81,20 +102,13 @@ async def send_emails_by_frequency(frequencies: str|list[str]):
                 # add file to html content to temp folder
                 content = await get_content(user)
                 # insert advice record
-                data = {
+                adviceId = insert_advice_record({
                     "userId": user.id,
                     "transactions": content["advice"]["transactions"],
                     "initialAdjUtility": content["advice"]["initial_adj_utility"],
                     "finalAdjUtility": content["advice"]["final_adj_utility"],
                     "action": "REVIEW",
-                }
-
-                try:
-                    adviceId = insert_advice_record(data, db)
-                except OperationalError:
-                    # connection closed unexpectedly, open new connection and try again
-                    db = SessionLocal()
-                    adviceId = insert_advice_record(data, db)
+                }, db)
 
                 # render template
                 html_output = template.render(
@@ -116,6 +130,8 @@ async def send_emails_by_frequency(frequencies: str|list[str]):
                     send_queued_emails(queue, subject)
                     # reset queue
                     queue = []
+                    # commit current transaction
+                    db.commit()
 
             except Exception as e:
                 print(f"Could not construct email for {user.id}: ", str(e))
@@ -123,8 +139,8 @@ async def send_emails_by_frequency(frequencies: str|list[str]):
             # send any remaining emails
             send_queued_emails(queue, subject)
             print("Finished sending {} emails".format(freq.lower()))
-
-    # commit session
-    db.commit()
+            # commit any remaining transactions
+            db.commit()
+    
     # close db
     db.close()

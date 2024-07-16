@@ -106,13 +106,15 @@ async def calculate_portfolio_changes(
     return change_map
 
 def format_transactions(transactions: list[dict]):
+    # create copy of transactions
+    formatted_transactions = transactions.copy()
     # format transactions
-    for transaction in transactions:
+    for transaction in formatted_transactions:
         transaction["transaction"] = "📈 Buy" if transaction["units"] > 0 else "📉 Sell"
         transaction["value"] = "$  {:,.2f}".format(transaction["price"] * transaction["units"])
         transaction["price"] = "$  {:,.2f}".format(transaction["price"])
 
-    return transactions
+    return formatted_transactions
 
 async def get_content(user: User):
     # Step 0: populate user's portfolio with stock info
@@ -136,5 +138,4 @@ async def get_content(user: User):
         "body": markdown(body), # convert markdown to html
         "formatted_transactions": format_transactions(advice["transactions"]),
         "advice": advice,
-        # "articles": articles
     }
