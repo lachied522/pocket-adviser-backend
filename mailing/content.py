@@ -36,11 +36,12 @@ async def get_main_text(
     
     # get a subset of symbols for AI to talk about
     # we want a mix of stocks from the user's portfolio and the recommended transactions
-    # limit to 10
+    # limit to 5
+    max_symbols = 5
     sorted_changes = sorted([(key, abs(value['percent_change'])) for key, value in change_map.items() if key != "total"], key=lambda item: item[1])
     sorted_transactions = sorted([(transaction['symbol'], abs(transaction['units'] * transaction['price'])) for transaction in transactions], key=lambda item: item[1])
     symbols_of_interest = list(set(
-        [item[0] for item in sorted_changes][:10 - len(sorted_transactions)] +
+        [item[0] for item in sorted_changes][:max(max_symbols - len(sorted_transactions), 1)] +
         [item[0] for item in sorted_transactions]
     ))
 
@@ -51,12 +52,14 @@ async def get_main_text(
 
     sections = await asyncio.gather(*tasks)
 
-    system = "You are an enthusiastic investment adviser. Feel free to use emojis."
+    system = "You are an insightful, intelligent, and enthusastic investment adviser."
     
     content = (
         "Use the below information to write a comprehensive article about the stock market. " +
-        "The article should be split into sections General Market Update and Stocks You Might Be Interested In. " +
-        "Consider how the general market will the stocks mentioned." +
+        "The article should be split into sections: General Market Update and Stocks You Might Be Interested In. " +
+        "The first section should include an update on the overall stock market, what is driving the market, and important economic news. " +
+        "The second section should contain a brief update on each stock, including the potential impact of the general market on the stock. " +
+        "You can omit a stock if there is not enough information to provide a meaningful update."
         "\n'''\n" + # helps to separate info from above instruction
         "\n\n".join(sections)
     )

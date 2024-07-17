@@ -82,7 +82,6 @@ async def send_emails_by_frequency(frequencies: str|list[str]):
     # load email template
     env = Environment(loader=FileSystemLoader('./mailing'))
     template = env.get_template('template.html')
-
     # create the directory if it doesn't exist
     os.makedirs(DIRECTORY, exist_ok=True)
     # initiliase email subject - same for each user

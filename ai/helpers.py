@@ -16,6 +16,7 @@ GENERAL_QUERIES = [
     "What factors are influencing the stock market{region_modifier}{date_modifier}?",
     "What are investors thinking about this week{region_modifier}{date_modifier}?",
     "What is the stock market outlook{region_modifier}{date_modifier}?",
+    "What is the latest economic news{region_modifier}{date_modifier}?"
 ]
 
 async def get_general_market_update(region: str = "US"):
@@ -43,8 +44,8 @@ async def get_general_market_update(region: str = "US"):
 
     # get AI summary
     messages = [
-        {"role": "system", "content": "You are an enthusiastic investment adviser. Use the below info to answer the user's query.\n\n{}".format('\n\n'.join([json.dumps(item) for item in web_results]))},            
-        {"role": "user", "content": "What's happening in the stock market? Use at least 200 words and reference any sources used."}
+        {"role": "system", "content": "You are an intelligent investment adviser. Use the below info to answer the user's query.\n\n{}".format('\n\n'.join([json.dumps(item) for item in web_results]))},            
+        {"role": "user", "content": "What's happening in the stock market? I am especially interested in any economic updates. Use at least 300 words and reference any sources used."}
     ]
     response = await openai_call(messages)
 
