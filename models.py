@@ -55,6 +55,7 @@ class Stock(Base):
     sector = Column(String, nullable=True)
     pe = Column(Float, nullable=True)
     epsGrowth = Column(Float, nullable=True)
+    tags = Column(ARRAY(String), nullable=True)
 
 class Holding(Base):
     __tablename__ = 'Holding'

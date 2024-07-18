@@ -23,6 +23,7 @@ class Stock(BaseModel):
     sector: Optional[str]
     pe: Optional[float]
     epsGrowth: Optional[float]
+    tags: Optional[List[str]]
 
 class Holding(BaseModel):
     id: int

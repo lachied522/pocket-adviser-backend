@@ -279,19 +279,24 @@ class Optimiser:
         return Bounds(lb, ub, keep_feasible=True)
 
     def get_additional_factors(self, df: pd.DataFrame) -> list:
+        """
+        Additional factors are constants that shift the utility of stocks corresponding to user preferences.
+        """
         additional_factors = []
         # featured stocks
         # additional_factors.append(self.bias * np.array(df['tags'].apply(lambda x: 'Featured' in x)))
 
         # user preferences
         if self.profile.preferences is not None:
-            for sector, preference in self.profile.preferences.items():
-                factor = self.bias * self.target * np.array(df["sector"] == sector).astype(int)
-
-                if preference=="dislike":
+            for tag, preference in self.profile.preferences.items():
+                stock_vector = np.array(df.apply(
+                    lambda row: tag in [row['sector']] + (row['tags'] if row['tags'] else []),
+                    axis=1
+                ))
+                factor = self.bias * stock_vector.astype(int)
+                if preference == "dislike":
                     # reverse direction of bias
                     factor *= -1
-
                 additional_factors.append(factor)
 
         return additional_factors
