@@ -137,8 +137,8 @@ def get_stock_recommendation(
         proposed_portfolio.loc[-1] = { "stockId": stock["id"], "units": proposed_units }
     else:
         # update existing row
-        index = existing_holding.index[0]
-        proposed_portfolio.loc[index, "units"] = max(existing_holding["units"].iloc[0] + proposed_units, 0)
+        index = proposed_portfolio[proposed_portfolio["stockId"] == existing_holding["stockId"]].index[0]
+        proposed_portfolio.loc[index, "units"] = max(existing_holding["units"] + proposed_units, 0)
 
     final_adj_utility = optimiser.get_utility(proposed_portfolio)
 
