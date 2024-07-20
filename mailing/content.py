@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import asyncio
 import pandas as pd
 
@@ -19,6 +21,10 @@ freq_map = {
     "WEEKLY": "5D",
     "MONTHLY": "1M"
 }
+
+def get_today_date():
+    today = datetime.now()
+    return today.strftime('%A %d %B %Y') # e.g. Saturday 20 July 2024
 
 async def get_main_text(
         portfolio: pd.DataFrame,
@@ -59,7 +65,8 @@ async def get_main_text(
         "The article should be split into sections: General Market Update and Stocks You Might Be Interested In. " +
         "The first section should include an update on the overall stock market, what is driving the market, and important economic news. " +
         "The second section should contain a brief update on each stock, including the potential impact of the general market on the stock. " +
-        "You can omit a stock if there is not enough information to provide a meaningful update."
+        "You can omit a stock if there is not enough information to provide a meaningful update. " +
+        "Today's date is {}.".format(get_today_date()) +
         "\n'''\n" + # helps to separate info from above instruction
         "\n\n".join(sections)
     )

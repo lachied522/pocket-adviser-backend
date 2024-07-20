@@ -12,16 +12,19 @@ from ai.search import search_web
 redis = Redis.from_env()
 
 GENERAL_QUERIES = [
-    "What's happening in the stock market{region_modifier}{date_modifier}?",
-    "What factors are influencing the stock market{region_modifier}{date_modifier}?",
-    "What are investors thinking about this week{region_modifier}{date_modifier}?",
-    "What is the stock market outlook{region_modifier}{date_modifier}?",
-    "What is the latest economic news{region_modifier}{date_modifier}?"
+    "What's happening in the stock market today{region_modifier} {date_modifier}?",
+    "What factors are influencing the stock market{region_modifier} {date_modifier}?",
+    "What are investors thinking about this week{region_modifier} {date_modifier}?",
+    "What is the stock market outlook{region_modifier} {date_modifier}?",
+    "What is the latest economic news{region_modifier} {date_modifier}?"
 ]
 
 async def get_general_market_update(region: str = "US"):
     # check cache
-    cached_response = await redis.get(f"GENERAL_MARKET_UPDATE")
+    # use date suffix to ensure response is current
+    today = datetime.now()
+    key = "GENERAL_MARKET_UPDATE_{}".format(today.strftime('%#d_%m_%Y'))
+    cached_response = await redis.get(key)
 
     if cached_response:
         return cached_response
@@ -32,7 +35,7 @@ async def get_general_market_update(region: str = "US"):
         tasks.append(
             asyncio.create_task(search_web(
                 query=query.format(
-                    date_modifier=datetime.now().strftime('%#d %B %Y'),
+                    date_modifier=today.strftime('%#d %B %Y'), # e.g 20 July 2024
                     region_modifier=" in Australia" if region == "AUS" else "", # specify Australia
                 ),
                 include_answer=True,
@@ -44,13 +47,12 @@ async def get_general_market_update(region: str = "US"):
 
     # get AI summary
     messages = [
-        {"role": "system", "content": "You are an intelligent investment adviser. Use the below info to answer the user's query.\n\n{}".format('\n\n'.join([json.dumps(item) for item in web_results]))},            
+        {"role": "system", "content": "You are an intelligent investment adviser. Use the below info to answer the user's query.\n\n{}".format('\n\n'.join([json.dumps(item) for item in web_results if item]))},            
         {"role": "user", "content": "What's happening in the stock market? I am especially interested in any economic updates. Use at least 300 words and reference any sources used."}
     ]
     response = await openai_call(messages)
-
     # add response to cache
-    await redis.set("GENERAL_MARKET_UPDATE", response, ex=24*60*60)
+    await redis.set(key, response, ex=24*60*60)
     return response
 
 async def get_stock_update_by_symbol(symbol: str):

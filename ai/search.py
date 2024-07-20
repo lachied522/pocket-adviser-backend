@@ -2,8 +2,6 @@ import os
 import aiohttp
 import json
 
-# from datetime import datetime
-
 def format_response(res):
     """
     Format response from search_web function for reading by LLM.
@@ -36,7 +34,7 @@ async def search_web(query: str, include_answer: bool = True, search_depth: str 
             })
         ) as response:
             if response.status != 200:
-                print(await response.json())
-                raise Exception("Error searching web")
+                print("Error searching web: ", await response.json())
+                return None
             data = await response.json()
             return format_response(data)
